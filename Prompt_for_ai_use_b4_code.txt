@@ -1,0 +1,38 @@
+CONTEXT PROMPT FOR AI — READ BEFORE HELPING WITH THIS PROJECT
+
+You are being asked to help with "sheSafe," a personal-safety / covert-camera-detection system built by a 4-person student team (Samarth Prabhu, Amogh Neeli, Saamarth S, Prajwal V Jois) as an RVCE Semester 3 Experiential Learning (EL) project. It began as a hackathon project that won 1st prize, and the team is now upgrading it toward a more robust, research-grade implementation. Read this entire prompt before writing or suggesting any code — it explains what already exists so you don't duplicate or contradict working functionality.
+
+WHAT THE SYSTEM DOES
+sheSafe detects hidden/spy cameras in a room using only an ESP32 microcontroller and the user's smartphone (no app install, no cloud, no home Wi-Fi dependency). It has three subsystems, all served from one ESP32-hosted web dashboard:
+
+1. WIRELESS CAMERA RADAR — detects spy cameras that transmit over Wi-Fi or BLE, and guides the user toward the source using directional signal-strength tracking.
+2. WIRED CAMERA DETECTOR — detects offline/SD-card spy cameras using the phone's camera and real-time in-browser computer vision to catch the IR LED glow + blink pattern these cameras emit.
+3. IOT ALERT SYSTEM — a PIR motion sensor plus a GPS-based SOS panic button that sends WhatsApp alerts to a trusted contact.
+
+CURRENT TECH STACK (already built, working)
+- Firmware: ESP32 in Arduino/C++, using WiFi.h, WebServer.h, NimBLEDevice.h.
+- Concurrency: FreeRTOS dual-core split — Core 0 runs a background scanTask (Wi-Fi + BLE scanning), Core 1 runs the WebServer loop. A mutex semaphore (jsonMutex) protects shared JSON strings (wifiJson, bleJson) between cores.
+- REST endpoints exposed by the ESP32: GET /wifi, GET /ble, GET /pir-status, GET /trigger-whatsapp (and / serving the dashboard HTML).
+- Dashboard: a single embedded HTML/CSS/JS page (stored via PROGMEM, chunk-streamed to the browser) with two switchable modes (Wireless Radar / Wired Detector), canvas-based radar and signal-plot visualizations, and a shared console log.
+- Directional guidance (wireless mode): 8 compass sectors (45° each), gyroscope/compass heading via the browser's deviceorientation API, gradient-ascent logic comparing RSSI trends per sector to guess the best direction, a "HIT WALL" feature that blacklists a sector and suggests routing around it using neighboring sector data. FOUND state triggers at RSSI ≥ -50 dBm.
+- CV pipeline (wired mode): getUserMedia camera capture → downsample to 320×240 → RGB-to-HSL pixel filtering for magenta/pink IR signature → BFS blob clustering (rejects blobs >250px or >50×50 bounding box) → rolling 5.5s brightness history per blob → blink-transition consistency check (rate + jitter) → threat score 0–100 → alarm + WhatsApp trigger at threat score ≥75.
+- Alerts: sent directly from the browser via a client-side fetch() POST to a Green API WhatsApp gateway endpoint (not sent through the ESP32 itself — the ESP32's own /trigger-whatsapp handler is currently just a Serial-log simulation, not a live send).
+- SOS button: HTML5 Geolocation API fetches GPS coordinates; if denied/unavailable, the alert is still sent immediately labeled "Location Unavailable" rather than delayed.
+- Networking: ESP32 runs its own Access Point (WiFi.softAP) for the dashboard, and also joins a phone's mobile hotspot in the background for internet-dependent features (Green API calls, made from the browser).
+
+KNOWN GAPS / MOCKED PARTS (do not assume these are "real" unless the user says they've upgraded them)
+- PIR sensor readings are currently a timed mock (active 4s every 15s cycle) — not a real GPIO read.
+- The wireless radar's directional demo uses a software-simulated fixed-bearing beacon (SPY_CAM_WIFI / SPY_BEACON_BLE at 90°) rather than a real triangulated signal, for demo purposes.
+- The ESP32's /trigger-whatsapp handler does not actually send WhatsApp messages — actual sending happens client-side via Green API.
+
+CODING PREFERENCES
+- The student team's primary coding language is C++ (used for the ESP32 firmware). Default to C++ conventions/idioms for any embedded/firmware work unless told otherwise.
+- The existing dashboard frontend is vanilla HTML/CSS/JavaScript (no frameworks) — match that style unless asked to modernize the stack.
+
+GOAL OF THE CURRENT PHASE
+The team wants to take this from a hackathon-winning demo to a more "research level" project — meaning more rigor, less mocking/simulation, and ideally some form of evaluation or measurable accuracy, suitable for an academic EL deliverable. When helping, prioritize suggestions that:
+- Replace simulated/mocked components with real sensor or signal integration where feasible.
+- Improve robustness of existing algorithms (e.g., RSSI-based direction estimation, IR-blink false-positive rejection).
+- Add any evaluation, testing, or documentation that would make the project's claims more rigorous and defensible.
+
+Please read the accompanying "Complete_Description_of_Project.md" file for full algorithmic detail before proposing changes, so your suggestions build on — rather than conflict with — what is already implemented and working.

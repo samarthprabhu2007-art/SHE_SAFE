@@ -1,0 +1,21 @@
+Everyone fill the name (complete name) of research paper you are currently reading below. This helps us to prevent reading same reaseach paper, read by our friends.
+
+Format : For each research paper , create a new papername.txt file in current folder, and in that write down features of the paper , below that research gap which we are solving.
+
+Research Paper Name :
+
+1)
+2)
+3)
+4)
+5)
+6)
+7)
+8)
+9)
+10)
+11)
+12)
+13)
+14)
+15)
