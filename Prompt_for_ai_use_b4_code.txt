@@ -1,13 +1,13 @@
 CONTEXT PROMPT FOR AI — READ BEFORE HELPING WITH THIS PROJECT
 
-You are being asked to help with "sheSafe," a personal-safety / covert-camera-detection system built by a 4-person student team (Samarth Prabhu, Amogh Neeli, Saamarth S, Prajwal V Jois) as an RVCE Semester 3 Experiential Learning (EL) project. It began as a hackathon project that won 1st prize, and the team is now upgrading it toward a more robust, research-grade implementation. Read this entire prompt before writing or suggesting any code — it explains what already exists so you don't duplicate or contradict working functionality.
+You are being asked to help with a personal-safety / covert-camera-detection device built by a 4-person student team (Samarth Prabhu, Amogh Neeli, Saamarth S, Prajwal V Jois) as an RVCE Semester 3 Experiential Learning (EL) project. It began as their project for the "sheSafe" hackathon, where it won 1st prize — note that "sheSafe" is the name of the hackathon, not the device itself; the device does not yet have a finalized name. The team is now upgrading it toward a more robust, research-grade implementation. Read this entire prompt before writing or suggesting any code — it explains what already exists so you don't duplicate or contradict working functionality.
 
 WHAT THE SYSTEM DOES
-sheSafe detects hidden/spy cameras in a room using only an ESP32 microcontroller and the user's smartphone (no app install, no cloud, no home Wi-Fi dependency). It has three subsystems, all served from one ESP32-hosted web dashboard:
+This device detects hidden/spy cameras in a room using only an ESP32 microcontroller and the user's smartphone (no app install, no cloud, no home Wi-Fi dependency). It has two detection subsystems plus an emergency alert feature, all served from one ESP32-hosted web dashboard:
 
 1. WIRELESS CAMERA RADAR — detects spy cameras that transmit over Wi-Fi or BLE, and guides the user toward the source using directional signal-strength tracking.
 2. WIRED CAMERA DETECTOR — detects offline/SD-card spy cameras using the phone's camera and real-time in-browser computer vision to catch the IR LED glow + blink pattern these cameras emit.
-3. IOT ALERT SYSTEM — a PIR motion sensor plus a GPS-based SOS panic button that sends WhatsApp alerts to a trusted contact.
+3. EMERGENCY SOS — a GPS-based panic button that sends WhatsApp alerts to a trusted contact.
 
 CURRENT TECH STACK (already built, working)
 - Firmware: ESP32 in Arduino/C++, using WiFi.h, WebServer.h, NimBLEDevice.h.
@@ -21,7 +21,6 @@ CURRENT TECH STACK (already built, working)
 - Networking: ESP32 runs its own Access Point (WiFi.softAP) for the dashboard, and also joins a phone's mobile hotspot in the background for internet-dependent features (Green API calls, made from the browser).
 
 KNOWN GAPS / MOCKED PARTS (do not assume these are "real" unless the user says they've upgraded them)
-- PIR sensor readings are currently a timed mock (active 4s every 15s cycle) — not a real GPIO read.
 - The wireless radar's directional demo uses a software-simulated fixed-bearing beacon (SPY_CAM_WIFI / SPY_BEACON_BLE at 90°) rather than a real triangulated signal, for demo purposes.
 - The ESP32's /trigger-whatsapp handler does not actually send WhatsApp messages — actual sending happens client-side via Green API.
 

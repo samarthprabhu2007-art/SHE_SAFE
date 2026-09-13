@@ -1,7 +1,7 @@
-# sheSafe — Complete Project Description
+# [Device Name TBD] — Complete Project Description
 
 **Project type:** RVCE Semester 3 Experiential Learning (EL) Project
-**Origin:** Built for and won 1st Prize at a hackathon last semester. Currently being expanded into a more research-grade system.
+**Origin:** Built for and won 1st Prize at the **sheSafe hackathon** last semester. Currently being expanded into a more research-grade system. (Note: "sheSafe" is the name of the hackathon this project was built for — the device/system itself does not yet have a finalized name.)
 **Team:** Samarth Prabhu, Amogh Neeli, Saamarth S, Prajwal V Jois
 
 ---
@@ -13,24 +13,24 @@ Covert surveillance devices (hidden cameras) are a growing personal-safety and p
 - **Wireless spy cameras** — stream footage over Wi-Fi or advertise via BLE.
 - **Wired/SD-card spy cameras** — do not transmit any RF signal, so they must be found visually (typically via their IR illumination used for night vision).
 
-sheSafe is a self-contained, portable detection system that addresses both categories using only an ESP32 microcontroller and the user's own smartphone — no app installation, no cloud backend, no dependency on existing Wi-Fi infrastructure.
+This device is a self-contained, portable detection system that addresses both categories using only an ESP32 microcontroller and the user's own smartphone — no app installation, no cloud backend, no dependency on existing Wi-Fi infrastructure.
 
 ---
 
 ## 2. System Architecture Overview
 
-The system has three integrated subsystems, all served from a single ESP32 as a self-hosted web dashboard the user opens in their phone's browser:
+The system has two detection subsystems plus an emergency alert feature, all served from a single ESP32 as a self-hosted web dashboard the user opens in their phone's browser:
 
 1. **Wireless Camera Radar** — RF detection + directional guidance
 2. **Wired Camera Detector** — computer-vision-based IR lens detection
-3. **IoT Alert & Networking** — motion sensing + emergency SOS
+3. **Emergency SOS & Networking** — GPS-based panic button and portable networking
 
 ---
 
 ## 3. Part 1: Wireless Camera Radar
 
 ### 3.1 Core Concept
-Wireless spy cameras must transmit RF signals (2.4 GHz Wi-Fi or BLE) to stream footage. sheSafe scans these bands, tracks signal strength, and guides the user to the source.
+Wireless spy cameras must transmit RF signals (2.4 GHz Wi-Fi or BLE) to stream footage. This device scans these bands, tracks signal strength, and guides the user to the source.
 
 ### 3.2 Hardware Architecture (Dual-Core ESP32 + FreeRTOS)
 - **Core 0 — Background Scanning (`scanTask`)**: Continuously sweeps Wi-Fi (`WiFi.scanNetworks`) and BLE (`NimBLEDevice`) in a dedicated FreeRTOS task pinned to core 0. Collects SSID/device name, MAC/BSSID, RSSI, channel, and frequency. Runs a scan cycle roughly every 2 seconds (Wi-Fi scan + a 2s BLE scan window).
@@ -43,7 +43,7 @@ Wireless spy cameras must transmit RF signals (2.4 GHz Wi-Fi or BLE) to stream f
 - The browser dashboard polls `/wifi` every 3s and `/ble` every 5s.
 
 ### 3.4 Directional Guidance Engine (Gradient Ascent over 8 Sectors)
-Since standard Wi-Fi/BLE antennas are **omnidirectional**, a single RSSI reading carries no directional information. sheSafe solves this with **spatial memory / differential tracking**:
+Since standard Wi-Fi/BLE antennas are **omnidirectional**, a single RSSI reading carries no directional information. This is solved with **spatial memory / differential tracking**:
 
 - **Sector mapping**: The 360° space around the user is divided into 8 sectors of 45° each.
 - **Sensor fusion**: The phone's `deviceorientation` API (compass heading / gyroscope) tracks the user's real-time heading, mapped relative to a baseline set when tracking starts.
@@ -102,25 +102,20 @@ All video processing happens **entirely client-side in the browser** — no vide
 
 ---
 
-## 5. Part 3: IoT Alert & Networking System
+## 5. Part 3: Emergency SOS & Networking
 
-### 5.1 PIR Motion Monitoring
-- A Passive Infrared (PIR) sensor connected to the ESP32 detects heat-signature changes (e.g., an intruder entering a room).
-- The dashboard polls `GET /pir-status` every 2 seconds.
-- *(Current implementation status: the firmware's `handlePIR()` currently returns a **mocked** motion pattern — active for ~4 seconds every 15-second cycle — rather than reading a live PIR GPIO pin. Real PIR pin integration is a planned next step.)*
-
-### 5.2 SOS Emergency Button
+### 5.1 SOS Emergency Button
 - Tapping the SOS button (with a confirmation prompt) triggers the HTML5 Geolocation API to fetch the phone's current GPS coordinates.
 - Constructs an emergency message: `🚨 EMERGENCY SOS ALERT — Time: [timestamp], Location: https://maps.google.com/?q=[lat],[lon]`.
 - If GPS is unavailable/denied, the alert is still sent immediately with `Location Unavailable` rather than being delayed — safety-first fallback.
 
-### 5.3 WhatsApp Alerts via Green API
+### 5.2 WhatsApp Alerts via Green API
 - The alert message (from either the SOS button or a confirmed camera detection) is POSTed directly from the browser (client-side `fetch`) to a Green API instance endpoint.
 - Green API relays the message to WhatsApp's servers, which deliver it to a pre-configured recipient number as a normal WhatsApp message.
 - Chosen over WhatsApp's official Business API because Green API allows linking a personal WhatsApp number without business verification, template approval, or per-message cost — suited for a free, personal-safety tool.
 - *(Note: the ESP32 firmware also exposes a `/trigger-whatsapp` endpoint that currently only logs a simulated alert to Serial — the actual WhatsApp delivery in the current build happens directly from the browser via Green API, not through the ESP32.)*
 
-### 5.4 Portability
+### 5.3 Portability
 - The ESP32 runs its own Access Point (`WiFi.softAP`) so the dashboard is reachable directly, and additionally attempts to join a phone's mobile hotspot in the background (`WiFi.begin(...)`) for internet-dependent features (Green API, Geolocation-linked alerts). This means the whole system can be deployed anywhere — hotel room, Airbnb, unfamiliar location — with just the ESP32 and a phone, no home network required.
 
 ---
@@ -130,7 +125,6 @@ All video processing happens **entirely client-side in the browser** — no vide
 - **Firmware**: Arduino/C++ on ESP32, using `WiFi.h`, `WebServer.h`, and `NimBLEDevice.h`. Dual-core task split via `xTaskCreatePinnedToCore` (scan task on core 0), synchronized via `SemaphoreHandle_t jsonMutex`.
 - **Dashboard**: A single embedded HTML/CSS/JS page (stored in flash via `PROGMEM`, streamed to the browser in 2KB chunks) implementing both the Wireless Radar and Wired Detector UIs as switchable "modes," a unified system log console, canvas-based radar and signal-plot visualizations, and all client-side logic (compass tracking, CV pipeline, blink analysis, Green API calls).
 - **Known mocked/simulated components** (candidates for the "research-level" upgrade):
-  - PIR motion sensor readings are currently a timed mock, not a real GPIO read.
   - The wireless radar's directional demo relies on a software-simulated beacon at a fixed bearing rather than a real triangulated signal.
   - The ESP32's own `/trigger-whatsapp` handler simulates the alert via Serial log rather than actually sending it — real WhatsApp delivery currently happens client-side via Green API from the browser.
   - IR LED pin (`IR_LED_PIN`, pin 14) blinks locally on the ESP32 at 500ms — its exact role in the current detection demo vs. future test-rig use should be clarified/expanded as the project matures.
@@ -138,7 +132,6 @@ All video processing happens **entirely client-side in the browser** — no vide
 ## 7. Possible Directions for the "Research-Level" Upgrade
 
 *(For the team to discuss/refine — not yet decided, listed here as prompts for future planning:)*
-- Replacing the mocked PIR logic with real sensor integration and event logging/history.
 - Improving the RSSI-based distance/direction model with more rigorous RF propagation modeling or triangulation from multiple vantage points.
 - Benchmarking the IR-blink CV detector's false-positive/false-negative rates against a labeled dataset of real hidden cameras vs. non-camera light sources.
 - Formal write-up/evaluation suitable for a research paper or technical report (methodology, test conditions, accuracy metrics).
