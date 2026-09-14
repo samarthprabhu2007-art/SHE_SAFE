@@ -1,0 +1,21 @@
+IEEE -> 2022
+
+Efficient Framework for Hidden Camera Detection & Jamming using IoT
+
+What the paper is about
+
+It proposes an IoT-based framework using an Arduino Lilypad + ESP8266 + RF detector to detect a hidden camera's RF emissions, alert the user via cloud → Gmail → phone message + buzzer, and then jam the camera's network connection to disable it.
+
+RESEARCH GAPS :
+
+No quantitative results at all. There's no accuracy rate, no detection range, no jamming success percentage, no comparison table against the "existing methods" they claim to outperform. The results section is literally just descriptions of 6 photos (Figs 2–6) of breadboards with blinking LEDs — no benchmarking, no test methodology, no dataset.
+
+RF detection is extremely coarse. Their "RF Detector" module just checks for the presence of RF energy in the area — it can't distinguish a spy camera's Wi-Fi signal from any other Wi-Fi device, Bluetooth device, microwave, or baby monitor in range. False-positive rate is never discussed.
+
+Jamming is legally and practically fraught. Jamming a whole network doesn't just disable a spy camera — it disables everything on that Wi-Fi channel (other people's legitimate devices), and RF jamming is illegal in most jurisdictions (India included, under the Wireless Telegraphy Act) without a license. The paper never engages with this at all.
+
+No handling of non-wireless (wired/SD-card) cameras. Their entire approach depends on the camera transmitting a detectable RF signal — a camera with no wireless capability is completely invisible to this system.
+
+Vague on the RFID extension. The abstract mentions "an extension to this RFID is introduced," but the body of the paper never actually describes an RFID implementation, hardware, or results — it's asserted, not shown.
+
+No directional/localization capability. It only tells you whether a camera is present in the room, not where — no compass/sector guidance like what you built.
