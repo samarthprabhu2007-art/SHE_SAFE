@@ -1,0 +1,22 @@
+RSSI-Based Indoor Localization With the Internet of Things
+
+IEEE Access, 2018 — Sebastian Sadowski, Petros Spachos (University of Guelph)
+
+Core idea: Head-to-head comparison of four IoT wireless technologies — WiFi (802.11n, 2.4 GHz), Bluetooth Low Energy (BLE), Zigbee, and LoRaWAN — for RSSI-based indoor positioning using trilateration. Three or more anchor nodes at known positions broadcast beacons; a receiver logs RSSI from each, converts RSSI → estimated distance via a log-distance path-loss model, and triangulates position. Experiments ran in two environments: a large, high-interference research lab and a smaller, low-noise meeting room. Key result: WiFi delivered the best raw accuracy but at far higher power draw; BLE offered the best accuracy-per-milliwatt trade-off; Zigbee and LoRaWAN lagged in accuracy but excel in range/battery life for asset-tracking use cases.
+
+What it brings to the table:
+
+Directly validates the core signal your wireless radar already uses — RSSI — and quantifies how noisy it actually is across technologies you support (WiFi + BLE). This is the empirical backing for why your gradient-ascent algorithm needs momentum smoothing and sector averaging rather than trusting raw readings.
+Trilateration math is the natural next step beyond your current single-point "getting warmer / colder" heuristic — if you ever add a second or third ESP32 anchor, this paper gives the algorithm and expected error bounds.
+Confirms the WiFi-vs-BLE accuracy–power trade-off: WiFi is more precise but drains the ESP32 faster, BLE is noisier but much cheaper on battery — explains why your scan intervals differ (3s WiFi, 5s BLE).
+The two-environment test (high-noise lab vs. quiet room) mirrors your real deployment: a hotel room is small/quiet like the meeting room, but a hostel corridor or Airbnb common area is noisier — gives you expectations for both.
+
+Key limitations:
+
+Trilateration needs ≥3 anchors at known, fixed positions — your system has exactly one ESP32 that the user carries around, so classic trilateration doesn't directly apply; you'd need a fundamentally different deployment model (multiple fixed ESP32 beacons) or rely on sequential measurements as the user moves (which is what your sector-averaging does, but without formal geometric guarantees).
+Log-distance path-loss model is environment-specific — the paper fits path-loss exponents per-room, but those constants change with furniture, wall materials, and human-body shadowing. No automatic calibration or transfer method is provided, so accuracy degrades if you just copy their exponents into a different hotel room.
+Static scenario only — all measurements taken with transmitter and receiver stationary. Your user is walking/rotating while scanning, introducing Doppler shifts and body-shadowing dynamics the paper doesn't model.
+No device classification — the paper treats all transmitters as cooperative anchors. It never asks "is this transmitter a spy camera?", only "where is this known beacon?". The identification step (friend vs. foe) is entirely out of scope.
+2018 hardware/firmware — results are from first-gen BLE 4.x beacons and 2.4 GHz-only WiFi. Modern BLE 5.x (which the ESP32-S3 NimBLE stack supports) has improved RSSI stability and range; WiFi 6 has better channel estimation. The absolute accuracy numbers may be pessimistic for current hardware.
+
+Bottom line: the most directly relevant "building-block" paper for your wireless radar — it doesn't detect cameras, but it rigorously quantifies the signal (RSSI) and algorithm (trilateration) your system is built on. Best used to justify your design choices (why momentum-smoothed sector averaging, why different WiFi/BLE poll rates) and to frame the research gap: existing RSSI localization assumes cooperative anchors at known positions — your contribution is adapting it to a single mobile scanner hunting a non-cooperative, unknown-position target.

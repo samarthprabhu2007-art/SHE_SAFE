@@ -1,0 +1,22 @@
+LAPD (Laser-Assisted Photography Detection)
+
+ACM SenSys 2021 — Sriram Sami et al. (NUS, Yonsei University)
+
+Core idea: Repurpose the Time-of-Flight (ToF) sensor already in many flagship smartphones to detect hidden cameras. The ToF sensor fires infrared laser pulses; when these hit a camera lens, a high-intensity retro-reflection bounces back (lens-sensor retro-reflection — the multi-element optical stack acts like a retroreflector). A deep-learning filter, running on the phone, classifies each reflection as "camera lens" vs. "ordinary shiny surface" based on intensity profile and spatial signature. The app guides the user through a room sweep, overlaying suspected camera locations on the live camera feed. In a 379-participant study the system achieved an 88.9% detection rate, roughly double the 46% rate from naked-eye inspection.
+
+What it brings to the table:
+
+Detects cameras that emit no RF signal at all — wired, SD-card, even powered-off cameras with a lens exposed — covering a class your wireless radar can never reach.
+Uses commodity hardware the user already owns (phone with ToF sensor), no ESP32 or external rig needed for this particular subsystem.
+Quantitative, user-study-backed accuracy numbers give a credible baseline to compare your own IR-blink detector against.
+Confirms that optical detection and RF detection are complementary, not competing — same conclusion your project reaches.
+
+Key limitations:
+
+Hardware gated — requires a ToF sensor (iPhone 12 Pro+, Galaxy S20+ class). Most mid-range / budget phones don't have one, so a huge fraction of the target user base is excluded.
+RGB ↔ ToF misalignment — the colour camera and depth sensor aren't perfectly co-located, so suspected cameras can appear at the wrong spot on screen unless manual calibration or ARCore registration is applied, which the prototype doesn't fully solve.
+Distance-sensitive — retro-reflection intensity falls off steeply; the user must be within an "ideal range" (~0.5–2 m) for reliable detection, so a fast room sweep from the doorway won't work.
+Defeated by physical countermeasures — a camera behind a diffuser, tinted cover, or pinhole too small for a strong retro-reflection will evade the sensor entirely.
+Research prototype only — the paper explicitly warns against mission-critical use; no production app, no iOS build, no continuous-scanning mode.
+
+Bottom line: validates the optical side of your dual-modality approach but solves a different sub-problem (retro-reflection of an external laser vs. detection of the camera's own IR-LED blink pattern). Best cited as prior art showing that optical-only detection tops out at ~89% and still misses covered/filtered lenses — motivating your system's combined RF + CV strategy that doesn't depend on any single detection mode.

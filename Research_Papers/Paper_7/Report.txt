@@ -1,0 +1,21 @@
+AHCL (AI-aided Hidden Camera Detection and Localization based on Raw IoT Network Traffic)
+
+IEEE 47th Conference on Local Computer Networks (LCN), 2022 — Jihyeon Lee, Sangwon Seo, Taehun Yang, Soochang Park
+
+Core idea: Detect and locate hidden cameras purely from network traffic analysis — no physical hardware scanner needed. The system monitors raw packets at the router level, applies a Support Vector Machine (SVM) to filter out video-streaming traffic from background noise, feeds the filtered stream through a Denoising Autoencoder (DAE) to clean up noisy/fragmented captures, and finally classifies the cleaned features with an Ensemble Neural Network to decide (a) whether a hidden camera is streaming and (b) which network segment it's on. Dataset: 60,412 labelled packets (normal vs. video-streaming). Best ensemble model hit 98.27% detection accuracy; the paper also reports 99.5% in a more controlled subset.
+
+What it brings to the table:
+
+Entirely complementary detection modality — your system looks for RF presence (WiFi/BLE scan) and optical signatures (IR blink); AHCL looks at what the traffic is carrying. A spy camera can have a perfectly normal-looking SSID and RSSI but still be identified by its traffic pattern (continuous upstream video bitrate ≫ typical IoT telemetry).
+Zero extra hardware — runs on existing router/AP infrastructure or even a laptop in monitor mode, which your ESP32 in STA mode could partially emulate by sniffing promiscuous-mode packets.
+The SVM → DAE → Ensemble pipeline is a clean three-stage architecture you could reference as a design template for your own classification chain (scan → filter → score → alert).
+
+Key limitations:
+
+Network access required — the system must be on the same LAN as the spy camera (or at least able to see its packets). In a hotel room you typically can't access the router; your ESP32 runs its own AP so you'd only see traffic from devices that join your network, not from a camera streaming over the hotel WiFi. Promiscuous/monitor-mode sniffing on the ESP32 is possible but limited (no full 802.11 decryption of third-party traffic without the WPA key).
+Encrypted traffic blind spots — modern spy cameras streaming over HTTPS/SRTP/QUIC encrypt payload; the SVM/DAE pipeline relies partly on packet-level features that may be opaque under encryption. The paper tests on unencrypted or lightly-encrypted streams; a camera using end-to-end encrypted cloud upload (e.g., via a commercial app) would look like generic TLS traffic.
+No wired/SD-card camera coverage — exactly the same gap as your RF radar: if the camera doesn't transmit over the network at all, it's invisible.
+Static, controlled environment — the 60k-packet dataset was collected in a lab setup. Real hotel/Airbnb networks have vastly more diverse background traffic (smart TVs, streaming sticks, other guests' phones), which would raise the false-positive rate. Cross-environment generalization is not validated.
+Localization is coarse — "which network segment" is not "which corner of the room." The paper doesn't provide sub-room spatial resolution; you'd still need your RSSI-gradient or compass-guided approach to physically walk to the device.
+
+Bottom line: the strongest "software-only, no-new-hardware" detection paper in the set. Best cited as evidence that traffic analysis can catch streaming cameras your RF presence scan might miss (normal-looking SSID/RSSI but anomalous bitrate), while honestly noting the deployment barrier — you need LAN-level packet visibility, which a user in a hotel room usually doesn't have. If you ever add a "connected to hotel WiFi" mode, the SVM traffic filter is a concrete feature to implement.

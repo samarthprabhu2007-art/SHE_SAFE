@@ -1,0 +1,20 @@
+MRFE (Multidimensional Radio Frequency Fingerprinting Enhancement)
+
+IEEE Internet of Things Journal, Vol. 11 No. 18, 2024 — Qian Lu, Zaikai Yang, Hanlin Zhang, Fei Chen, Hequn Xian
+
+Core idea: Improve RF fingerprinting for IoT device identification by exploiting the internal hardware-path structure of a transmitter rather than treating the whole IQ signal as one blob. Raw IQ samples are decomposed into multiple dimensions (amplitude, phase, frequency offset, etc.) that each map to a different physical sub-circuit (oscillator, mixer, power amplifier). A novel Fingerprint Strengthen Layer (FSL) extracts features from each path independently, then an attention-based fusion module weights and merges them into a single enhanced fingerprint vector. Validated on the public ORACLE dataset (16 Ettus USRP X310 transmitters with identical configurations — "bit-similar" devices), achieving 99.33% identification accuracy, outperforming flat CNN baselines that treat the signal as a single-channel input.
+
+What it brings to the table:
+
+Provides a principled way to tell apart devices that look identical at the protocol level — exactly the problem you face when your ESP32 scan returns five "ESP32-CAM" SSIDs with similar MACs and you need to know which one is the spy camera vs. a legitimate IoT gadget.
+Attention-based fusion is a design pattern you could adapt: your system already fuses WiFi RSSI + BLE RSSI + compass heading; MRFE shows how to learn which signal dimensions matter most rather than weighting them by hand.
+Physical-layer fingerprints are much harder to spoof than MAC addresses or SSIDs — gives a stronger authentication signal than anything your current scan collects.
+
+Key limitations:
+
+Requires raw IQ samples — the standard ESP32 WiFi/BLE stack exposes only RSSI (a scalar), not the underlying IQ waveform. Extracting IQ data would need either a different radio front-end (e.g., an RTL-SDR dongle) or custom ESP32 firmware using the proprietary Wi-Fi CSI API, which gives partial channel info but not true raw IQ.
+Lab-grade dataset — ORACLE uses high-end USRP software-defined radios transmitting clean, controlled waveforms. Real-world spy cameras are cheap consumer boards with noisy, variable RF front-ends; fingerprint stability and cross-environment generalization are open questions.
+Compute cost — the FSL + attention pipeline is a multi-layer deep network trained on GPU; running inference on an ESP32's 240 MHz dual-core CPU is infeasible without heavy quantization/pruning, and even then latency would likely be seconds per device, not real-time.
+Closed-set assumption — the model classifies among a known, enrolled set of 16 devices. In the field your scanner encounters arbitrary unknown devices; open-set recognition (flagging novel/suspicious transmitters) is not addressed.
+
+Bottom line: strongest theoretical foundation for "which device is the spy camera?" among the RF papers reviewed, but the gap between USRP lab conditions and ESP32-in-a-hotel-room is large. Most useful as a research direction to cite for future work — if you ever upgrade to a platform that exposes IQ data (e.g., ESP32 CSI + an SDR sniffer), the FSL concept maps directly onto your multi-signal fusion architecture.

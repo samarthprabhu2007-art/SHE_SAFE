@@ -1,0 +1,21 @@
+FingerBLE (A Device Fingerprint Identification Scheme for BLE Devices)
+
+IEEE ICPADS 2023 — Xikai Sun, Fan Dang (Tsinghua University)
+
+Core idea: Authenticate BLE devices using physical-layer hardware fingerprints rather than protocol-level identifiers (MAC address, device name) that can be trivially cloned or randomized. Every BLE radio chip has unique manufacturing imperfections — Carrier Frequency Offset (CFO) from crystal-oscillator variance, IQ imbalance (amplitude/phase mismatch between the in-phase and quadrature branches), power-amplifier non-linearity, and oscillator phase noise. FingerBLE captures raw IQ samples from BLE advertisement packets, applies pre-emphasis → framing → windowing → FFT, then feeds the frequency-domain representation through a hybrid filter bank that emphasizes the spectral regions most affected by these hardware imperfections. A classifier trained on these emphasized features builds a fingerprint database; incoming BLE transmissions are matched against this database to verify device identity. The scheme achieved high identification accuracy across a set of BLE devices without requiring any modification to the BLE protocol stack.
+
+What it brings to the table:
+
+Directly addresses a weakness in your BLE scan — right now your ESP32 NimBLE scan reports device name + RSSI, both of which an attacker can spoof. If you could fingerprint the physical radio chip, a cloned-name spy camera would still be distinguishable from a legitimate device because its hardware imperfections won't match.
+CFO is already partially observable on the ESP32 — the NimBLE stack doesn't expose raw IQ, but frequency offset can be estimated from the BLE preamble/sync-word correlation. This is the lowest-hanging fruit for adding a fingerprinting signal to your existing scan without new hardware.
+The hybrid filter bank concept — selectively weighting frequency bins where hardware variation is strongest — is a clean, interpretable feature-engineering approach you could adapt even with limited spectral resolution from the ESP32.
+
+Key limitations:
+
+Requires raw IQ capture — FingerBLE's full pipeline needs IQ samples from the BLE physical layer, which the ESP32's standard NimBLE stack does not expose. You'd need either (a) a software-defined radio (e.g., an HackRF or ADALM-PLUTO) as a sniffer, adding hardware cost and complexity, or (b) custom ESP32 firmware using undocumented radio registers to dump baseband samples — fragile and not guaranteed across chip revisions.
+Closed-set enrollment — like MRFE, the system classifies among a pre-enrolled set of known devices. In your scenario the spy camera is a novel, never-before-seen device; you'd need open-set anomaly detection ("this BLE fingerprint doesn't match any known-good device in the room") rather than closed-set classification ("this is Device #7").
+Environmental sensitivity — RF fingerprints can drift with temperature, battery voltage, and multipath propagation. The paper validates in a controlled indoor setting; a hotel room with different walls, furniture, and interference patterns may degrade fingerprint stability, especially for CFO which is temperature-dependent.
+BLE-only — the scheme is specific to BLE advertisement channels (37/38/39 at 2402/2426/2480 MHz). Spy cameras streaming over WiFi (2.4 GHz data channels or 5 GHz) are entirely out of scope; you'd need a separate WiFi fingerprinting approach (like MRFE or CSI-based methods).
+Latency — the FFT + filter-bank + classifier pipeline assumes offline or near-offline processing of captured IQ buffers. Real-time per-advertisement fingerprinting at BLE's 20ms–10s advertisement interval is tight, especially on constrained hardware.
+
+Bottom line: the most directly actionable BLE-security paper in the set for your project's threat model (spoofed device names/MACs). The full IQ pipeline is out of reach on your current ESP32 hardware, but the CFO-estimation subset is feasible and would add a meaningful "is this really the same device?" signal to your BLE scan. Best cited to motivate a future "BLE fingerprint verification" module and to articulate the gap: existing BLE fingerprinting assumes cooperative enrollment — your contribution would be adapting it to adversarial, zero-enrollment detection of unknown spy devices.
