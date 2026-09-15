@@ -1,0 +1,14 @@
+SweepLED (Hide-and-Sweep)
+
+ACM MobiSys 2026 — Yun et al. (KAIST, NUS, SMU)
+
+Core idea: Keep the phone camera still, and instead sweep a separate LED array in the phone case through multiple angles. Ordinary reflectors just shift/vanish (specular reflection — a simple single-bounce glint) as light angle changes; a camera lens's reflection deforms in shape because it's an internal optical stack (multiple lens elements + aperture + sensor). Difference frames (LED-on minus LED-off) isolate the sweep-induced reflection from ambient light, a Faster R-CNN (a standard two-stage deep learning object detector) finds candidate glints, and a trained classifier judges whether the deformation pattern across frames matches a lens. The best-performing classifier combined optical flow (a per-pixel motion vector field computed between consecutive frames, making subtle changes explicit) with an R(2+1)D backbone (a 3D convolutional network variant built specifically to learn spatial and temporal patterns together, well-suited to short video clips). Three viewpoints, ~4.5s total, majority vote across them.
+
+What it brings to the table:
+
+Detects the lens structure itself, not an emitted signal — so it catches cameras your IR-blink detector can't (no IR LED, IR-filtered, or non-blinking).
+Directly answers a gap your own Round 2 audit flagged: "Adversarial Optical Surfaces Defeating CV Model."
+Explicitly positions itself as fixing a flaw in prior approaches like LAPD, where moving the camera and light together (camera-light coupled illumination) makes it impossible to tell if a reflection changed due to lighting or due to the phone's own motion.
+Real cost: needs new phone-side hardware (LED case) and a full trained detector + classifier — a much bigger lift than CamLoPA. Named failure modes exist too (diffusive covers, light-blocking tints, head-on saturation).
+
+Bottom line: best used as a second-stage confirmation step on top of your always-on ambient scanner, or cited honestly as future work — not something to fully replicate this semester unless the LED hardware and dataset collection are explicitly budgeted for.
