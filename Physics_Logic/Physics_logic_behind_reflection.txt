@@ -1,0 +1,20 @@
+Physics Logic Behind Reflection (Camera Lens Detection)
+
+1. The Core Principle: Retro-Reflection
+Ordinary surfaces reflect light in two main ways:
+- Diffuse reflection (light scatters in all directions, like hitting a wall).
+- Specular reflection (light bounces off at an equal opposite angle, like hitting a mirror).
+However, a camera lens exhibits a special property called "retro-reflection." 
+
+2. How Retro-Reflection Works in Cameras
+A camera is not just a piece of glass; it's an optical stack containing multiple curved lens elements in front of an image sensor (like a CMOS or CCD chip).
+When a directed light source (such as an IR LED or a Time-of-Flight laser) shines into the lens:
+- The curved lenses focus the incoming light rays perfectly onto the image sensor at the back of the camera.
+- The sensor surface, which is highly reflective, bounces the light back.
+- Because the light travels back outward through the exact same curved lenses, the lenses collimate the light, sending it back in a tight, intense beam precisely along the same path it entered.
+
+3. Why It's Useful for Hidden Camera Detection
+Because retro-reflected light returns directly to the source rather than scattering, if you place a light emitter (like an IR LED or phone flash) very close to a detector (like your phone's camera), the detector will see an unusually bright, concentrated "glint" or halo exactly where the hidden lens is.
+This intensity signature is fundamentally different from a regular mirror or a shiny piece of plastic, which scatter the light or bounce it away at different angles. This makes retro-reflection a highly reliable physical indicator of a hidden optical system.
+
+(Prepared as part of Saamarth's research into optical detection logic.)
