@@ -5,14 +5,14 @@ Format : For each research paper , create a new papername.txt file in current fo
 Research Paper Name :
 
 1) Efficient Framework for Hidden Camera Detection & Jamming using IoT (IEEE)  -> Samarth Prabhu
-2) CamLoPA: A Hidden Wireless Camera Localization Framework via Signal Propagation Path Analysis (IEEE S&P 2025)
-3) Hide-and-Sweep: Detecting concealed cameras via LED illumination (ACM MobiSys 2026)
+2) CamLoPA: A Hidden Wireless Camera Localization Framework via Signal Propagation Path Analysis (IEEE S&P 2025) -> Prajwal
+3) Hide-and-Sweep: Detecting concealed cameras via LED illumination (ACM MobiSys 2026) -> Prajwal
 4) LAPD: Laser-Assisted Photography Detection (ACM SenSys 2021) -> Saamarth S
 5) MRFE: A Deep-Learning-Based Multidimensional RF Fingerprinting Enhancement for IoT Device Identification (IEEE IoT Journal 2024) -> Saamarth S
 6) RSSI-Based Indoor Localization With the Internet of Things (IEEE Access 2018) -> Saamarth S
 7) AI-aided Hidden Camera Detection and Localization based on Raw IoT Network Traffic (IEEE LCN 2022) -> Saamarth S
 8) FingerBLE: A Device Fingerprint Identification Scheme for BLE devices (IEEE ICPADS 2023) -> Saamarth S
-9)
+9) Wireless Spy Camera Spotter System With Real-Time Traffic Similarity Analysis and WiFi Signal Tracing (IEEE 2024) -> Amogh 
 10)
 11)
 12)

@@ -1,0 +1,20 @@
+IEEE → 2024
+
+Real-Time Sensing and On-Site Spotting Scheme of Multi-Type WLAN Spycams
+What the paper is about
+
+It proposes a real-time system for detecting and approximately locating wireless video-surveillance devices, including IP cameras and drones. The system captures Wi-Fi packets using a monitoring-mode adapter, groups packets based on source/destination information, applies the Nilsimsa hashing algorithm to identify repeated traffic patterns associated with video transmission, and then uses RSSI + the Log-Distance Path Loss (LDPL) model to estimate the device's distance.
+
+The main objective is to avoid the need for large location-specific datasets, machine-learning training, and specialized CSI hardware. The authors report that their system can determine the presence of a wireless video device within 3 seconds, with an average localization error of approximately 0.08 m within 1 m and 0.45 m within 3 m.
+
+The most important gaps for YOUR project
+
+If you're making a concise literature review, I'd use these 6:
+
+Only wireless video-transmitting devices → cannot detect offline/SD-card cameras.
+No optical/IR detection → doesn't physically detect a hidden camera lens or IR signature.
+RSSI localization has environmental limitations → multipath, shadowing, reflection and increasing error with distance.
+No precise directional navigation → the authors themselves identify improving direction accuracy as future work.
+Limited device/environment validation → only a small number of cameras and one drone were experimentally evaluated.
+Requires Wi-Fi monitor-mode hardware → their implementation uses Raspberry Pi + external Wi-Fi adapter and is demonstrated only on 2.4 GHz.
+

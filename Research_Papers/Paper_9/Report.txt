@@ -1,0 +1,17 @@
+IEEE → 2024
+
+Wireless Spy Camera Spotter System With Real-Time Traffic Similarity Analysis and WiFi Signal Tracing
+
+What the paper is about
+
+It proposes a software-based framework for detecting Wi-Fi-enabled spy cameras that are actively transmitting video. The system captures nearby network packets, classifies streaming traffic, uses the Nilsimsa similarity algorithm to identify repeated traffic patterns associated with cameras, and then uses Wi-Fi RSSI to approximately locate the suspected camera. The authors claim detection and localization without extensive training data or specialized CSI hardware.
+
+The strongest gaps for your project
+
+If you want to keep the literature review short, I'd specifically retain these 5:
+
+Only detects actively transmitting Wi-Fi cameras → doesn't cover offline/SD-card cameras.
+RSSI provides approximate localization → affected by multipath and environmental interference.
+No optical/IR detection → no independent physical lens-detection mechanism.
+No directional user guidance → gives approximate location but doesn't guide the user toward the source.
+Limited real-world generalization → evaluation is based on specific hardware and controlled environments.
