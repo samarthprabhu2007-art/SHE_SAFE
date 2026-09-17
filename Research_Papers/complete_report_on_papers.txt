@@ -1,0 +1,385 @@
+================================================================================
+COMPREHENSIVE LITERATURE SURVEY REPORT — 10 RESEARCH PAPERS
+Project: Covert Surveillance Detection System (RVCE Semester 3 EL / sheSafe)
+Team: Samarth Prabhu, Amogh Neeli, Saamarth S, Prajwal V Jois
+Date: September 2026
+================================================================================
+
+This document compiles the bibliographic information (Paper Title, Authors, Year,
+Venue/Type like IEEE/ACM, Reviewer, and PDF file) along with the complete review
+report text for each of the 10 research papers analyzed for the project.
+
+--------------------------------------------------------------------------------
+INDEX OF REVIEWED PAPERS:
+--------------------------------------------------------------------------------
+[01] Efficient Framework for Hidden Camera Detection & Jamming using IoT
+     Type/Year : IEEE Conference (2022)
+     Reviewer  : Samarth Prabhu
+[02] CAMLOPA: A Hidden Wireless Camera Localization Framework via Signal Propagation Path Analysis
+     Type/Year : IEEE S&P (IEEE Symposium on Security and Privacy) (2025)
+     Reviewer  : Prajwal V Jois
+[03] Hide-and-Sweep: Detecting Concealed Cameras via LED Illumination
+     Type/Year : ACM MobiSys (ACM International Conference on Mobile Systems, Applications, and Services) (2026)
+     Reviewer  : Prajwal V Jois
+[04] LAPD: Hidden Spy Camera Detection using Smartphone Time-of-Flight Sensors
+     Type/Year : ACM SenSys (ACM Conference on Embedded Networked Sensor Systems) (2021)
+     Reviewer  : Saamarth S
+[05] MRFE: A Deep-Learning-Based Multidimensional Radio Frequency Fingerprinting Enhancement Approach for IoT Device Identification
+     Type/Year : IEEE Internet of Things Journal (IEEE IoT-J, Vol. 11, No. 18) (2024)
+     Reviewer  : Saamarth S
+[06] RSSI-Based Indoor Localization With the Internet of Things
+     Type/Year : IEEE Access, Vol. 6 (DOI: 10.1109/ACCESS.2018.2843325) (2018)
+     Reviewer  : Saamarth S
+[07] AI-aided Hidden Camera Detection and Localization based on Raw IoT Network Traffic
+     Type/Year : IEEE LCN (47th IEEE Conference on Local Computer Networks) (2022)
+     Reviewer  : Saamarth S
+[08] FingerBLE: A Device Fingerprint Identification Scheme for BLE Devices
+     Type/Year : IEEE ICPADS (IEEE International Conference on Parallel and Distributed Systems) (2023)
+     Reviewer  : Saamarth S
+[09] Wireless Spy Camera Spotter System With Real-Time Traffic Similarity Analysis and WiFi Signal Tracing
+     Type/Year : IEEE Access, Vol. 12 (DOI: 10.1109/ACCESS.2024.3350175) (2024)
+     Reviewer  : Amogh Neeli
+[10] Real-Time Sensing and On-Site Spotting Scheme of Multi-Type WLAN Spycams
+     Type/Year : IEEE Access, Vol. 12 (DOI: 10.1109/ACCESS.2024.3482429) (2024)
+     Reviewer  : Team Research Review
+
+================================================================================
+
+################################################################################
+PAPER 1: Efficient Framework for Hidden Camera Detection & Jamming using IoT
+################################################################################
+• Complete Paper Name : Efficient Framework for Hidden Camera Detection & Jamming using IoT
+• Publication / Type  : IEEE Conference
+• Year                : 2022
+• Authors             : Dr. A. Pravin, Dr. T. Prem Jacob, Dr. K. Mohana Prasad, Dr. T. Judgi (Sathyabama Institute of Science and Technology, Chennai, India)
+• Local PDF File      : Research_Papers/Paper_1/Efficient_Framework_for_Hidden_Camera_Detection_amp_Jamming_using_IoT.pdf
+• Assigned Reviewer   : Samarth Prabhu
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+IEEE -> 2022
+
+Efficient Framework for Hidden Camera Detection & Jamming using IoT
+
+What the paper is about
+
+It proposes an IoT-based framework using an Arduino Lilypad + ESP8266 + RF detector to detect a hidden camera's RF emissions, alert the user via cloud → Gmail → phone message + buzzer, and then jam the camera's network connection to disable it.
+
+RESEARCH GAPS :
+
+No quantitative results at all. There's no accuracy rate, no detection range, no jamming success percentage, no comparison table against the "existing methods" they claim to outperform. The results section is literally just descriptions of 6 photos (Figs 2–6) of breadboards with blinking LEDs — no benchmarking, no test methodology, no dataset.
+
+RF detection is extremely coarse. Their "RF Detector" module just checks for the presence of RF energy in the area — it can't distinguish a spy camera's Wi-Fi signal from any other Wi-Fi device, Bluetooth device, microwave, or baby monitor in range. False-positive rate is never discussed.
+
+Jamming is legally and practically fraught. Jamming a whole network doesn't just disable a spy camera — it disables everything on that Wi-Fi channel (other people's legitimate devices), and RF jamming is illegal in most jurisdictions (India included, under the Wireless Telegraphy Act) without a license. The paper never engages with this at all.
+
+No handling of non-wireless (wired/SD-card) cameras. Their entire approach depends on the camera transmitting a detectable RF signal — a camera with no wireless capability is completely invisible to this system.
+
+Vague on the RFID extension. The abstract mentions "an extension to this RFID is introduced," but the body of the paper never actually describes an RFID implementation, hardware, or results — it's asserted, not shown.
+
+No directional/localization capability. It only tells you whether a camera is present in the room, not where — no compass/sector guidance like what you built.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 2: CAMLOPA: A Hidden Wireless Camera Localization Framework via Signal Propagation Path Analysis
+################################################################################
+• Complete Paper Name : CAMLOPA: A Hidden Wireless Camera Localization Framework via Signal Propagation Path Analysis
+• Publication / Type  : IEEE S&P (IEEE Symposium on Security and Privacy)
+• Year                : 2025
+• Authors             : Xiang Zhang, Jie Zhang, Zehua Ma, Jinyang Huang, Meng Li, Huan Yan, Peng Zhao, Zijian Zhang, Bin Liu, Qing Guo, Tianwei Zhang, NengHai Yu (University of Science and Technology of China, A*STAR, Hefei University of Technology, Guizhou Normal University, Beijing Institute of Technology, Nanyang Technological University)
+• Local PDF File      : Research_Papers/Paper_2/CamLopa_A_Hidden_Wireless_Camera_Localization_Framework_via_Signal_Propagation_Path_Analysis.pdf
+• Assigned Reviewer   : Prajwal V Jois
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+CamLoPA
+
+IEEE S&P 2025 — Zhang et al. (USTC, ASTAR, etc.)*
+
+Core idea: User walks two perpendicular paths through a Raspberry Pi device. Crossing the camera's Fresnel Zone (region around the direct signal path carrying most of the wireless energy) causes a sharp dip in CSI (per-frequency amplitude + phase — richer than plain RSSI). The ratio of dip-durations on the two paths cancels out unknown walking speed, and plugs into a closed-form trig formula (from Fresnel-Kirchhoff diffraction theory) to get direction. A pre-step — watching traffic drop when the user leaves the room — confirms it's actually a camera first. 45 seconds total, no training data needed.
+
+What it brings to the table:
+
+Replaces your RSSI-gradient-ascent heuristic with physics-based math instead of trial-and-error walking.
+No training pipeline — detection and localization are both rule-based/formula-driven.
+Runs on hardware you already have — CSI is extractable from the ESP32's existing radio.
+Confirms your IR/wired module stays necessary — it explicitly only catches WiFi-streaming cameras.
+
+Key limitations:
+
+Not passive/always-on — needs a user-driven 45s walk, unlike your current background scan.
+Needs specific movement — two straight, perpendicular paths through the device; hard in small/cluttered rooms.
+WiFi-only — no BLE coverage (you'd keep your NimBLE scan running separately).
+One device, limited arc — localizes a single flagged device, only within 0–180° per placement.
+Can miss quiet/buffered cameras — relies on a traffic drop when the user leaves; one tested camera model evaded this entirely.
+
+Bottom line: the lower-effort upgrade of the two — same hardware, no dataset, mostly a software rewrite. Best used as an on-demand precision mode layered on your existing passive scan, not a full replacement.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 3: Hide-and-Sweep: Detecting Concealed Cameras via LED Illumination
+################################################################################
+• Complete Paper Name : Hide-and-Sweep: Detecting Concealed Cameras via LED Illumination
+• Publication / Type  : ACM MobiSys (ACM International Conference on Mobile Systems, Applications, and Services)
+• Year                : 2026
+• Authors             : Daehwa Yun, Junho Ahn, et al. (KAIST, NUS, Singapore Management University)
+• Local PDF File      : Research_Papers/Paper_3/Hide-and-sweep_ Detecting concealed cameras via LED illumination.pdf
+• Assigned Reviewer   : Prajwal V Jois
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+SweepLED (Hide-and-Sweep)
+
+ACM MobiSys 2026 — Yun et al. (KAIST, NUS, SMU)
+
+Core idea: Keep the phone camera still, and instead sweep a separate LED array in the phone case through multiple angles. Ordinary reflectors just shift/vanish (specular reflection — a simple single-bounce glint) as light angle changes; a camera lens's reflection deforms in shape because it's an internal optical stack (multiple lens elements + aperture + sensor). Difference frames (LED-on minus LED-off) isolate the sweep-induced reflection from ambient light, a Faster R-CNN (a standard two-stage deep learning object detector) finds candidate glints, and a trained classifier judges whether the deformation pattern across frames matches a lens. The best-performing classifier combined optical flow (a per-pixel motion vector field computed between consecutive frames, making subtle changes explicit) with an R(2+1)D backbone (a 3D convolutional network variant built specifically to learn spatial and temporal patterns together, well-suited to short video clips). Three viewpoints, ~4.5s total, majority vote across them.
+
+What it brings to the table:
+
+Detects the lens structure itself, not an emitted signal — so it catches cameras your IR-blink detector can't (no IR LED, IR-filtered, or non-blinking).
+Directly answers a gap your own Round 2 audit flagged: "Adversarial Optical Surfaces Defeating CV Model."
+Explicitly positions itself as fixing a flaw in prior approaches like LAPD, where moving the camera and light together (camera-light coupled illumination) makes it impossible to tell if a reflection changed due to lighting or due to the phone's own motion.
+Real cost: needs new phone-side hardware (LED case) and a full trained detector + classifier — a much bigger lift than CamLoPA. Named failure modes exist too (diffusive covers, light-blocking tints, head-on saturation).
+
+Bottom line: best used as a second-stage confirmation step on top of your always-on ambient scanner, or cited honestly as future work — not something to fully replicate this semester unless the LED hardware and dataset collection are explicitly budgeted for.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 4: LAPD: Hidden Spy Camera Detection using Smartphone Time-of-Flight Sensors
+################################################################################
+• Complete Paper Name : LAPD: Hidden Spy Camera Detection using Smartphone Time-of-Flight Sensors
+• Publication / Type  : ACM SenSys (ACM Conference on Embedded Networked Sensor Systems)
+• Year                : 2021
+• Authors             : Sriram Sami, Sean Rui Xiang Tan, Bangjie Sun, et al. (National University of Singapore, Yonsei University)
+• Local PDF File      : Research_Papers/Paper_4/LAPD.pdf
+• Assigned Reviewer   : Saamarth S
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+LAPD (Laser-Assisted Photography Detection)
+
+ACM SenSys 2021 — Sriram Sami et al. (NUS, Yonsei University)
+
+Core idea: Repurpose the Time-of-Flight (ToF) sensor already in many flagship smartphones to detect hidden cameras. The ToF sensor fires infrared laser pulses; when these hit a camera lens, a high-intensity retro-reflection bounces back (lens-sensor retro-reflection — the multi-element optical stack acts like a retroreflector). A deep-learning filter, running on the phone, classifies each reflection as "camera lens" vs. "ordinary shiny surface" based on intensity profile and spatial signature. The app guides the user through a room sweep, overlaying suspected camera locations on the live camera feed. In a 379-participant study the system achieved an 88.9% detection rate, roughly double the 46% rate from naked-eye inspection.
+
+What it brings to the table:
+
+Detects cameras that emit no RF signal at all — wired, SD-card, even powered-off cameras with a lens exposed — covering a class your wireless radar can never reach.
+Uses commodity hardware the user already owns (phone with ToF sensor), no ESP32 or external rig needed for this particular subsystem.
+Quantitative, user-study-backed accuracy numbers give a credible baseline to compare your own IR-blink detector against.
+Confirms that optical detection and RF detection are complementary, not competing — same conclusion your project reaches.
+
+Key limitations:
+
+Hardware gated — requires a ToF sensor (iPhone 12 Pro+, Galaxy S20+ class). Most mid-range / budget phones don't have one, so a huge fraction of the target user base is excluded.
+RGB ↔ ToF misalignment — the colour camera and depth sensor aren't perfectly co-located, so suspected cameras can appear at the wrong spot on screen unless manual calibration or ARCore registration is applied, which the prototype doesn't fully solve.
+Distance-sensitive — retro-reflection intensity falls off steeply; the user must be within an "ideal range" (~0.5–2 m) for reliable detection, so a fast room sweep from the doorway won't work.
+Defeated by physical countermeasures — a camera behind a diffuser, tinted cover, or pinhole too small for a strong retro-reflection will evade the sensor entirely.
+Research prototype only — the paper explicitly warns against mission-critical use; no production app, no iOS build, no continuous-scanning mode.
+
+Bottom line: validates the optical side of your dual-modality approach but solves a different sub-problem (retro-reflection of an external laser vs. detection of the camera's own IR-LED blink pattern). Best cited as prior art showing that optical-only detection tops out at ~89% and still misses covered/filtered lenses — motivating your system's combined RF + CV strategy that doesn't depend on any single detection mode.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 5: MRFE: A Deep-Learning-Based Multidimensional Radio Frequency Fingerprinting Enhancement Approach for IoT Device Identification
+################################################################################
+• Complete Paper Name : MRFE: A Deep-Learning-Based Multidimensional Radio Frequency Fingerprinting Enhancement Approach for IoT Device Identification
+• Publication / Type  : IEEE Internet of Things Journal (IEEE IoT-J, Vol. 11, No. 18)
+• Year                : 2024
+• Authors             : Qian Lu, Zaikai Yang, Hanlin Zhang, Fei Chen, Hequn Xian
+• Local PDF File      : Research_Papers/Paper_5/MRFE_A_Deep-Learning-Based_Multidimensional_Radio_Frequency_Fingerprinting_Enhancement_Approach_for_IoT_Device_Identification.pdf
+• Assigned Reviewer   : Saamarth S
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+MRFE (Multidimensional Radio Frequency Fingerprinting Enhancement)
+
+IEEE Internet of Things Journal, Vol. 11 No. 18, 2024 — Qian Lu, Zaikai Yang, Hanlin Zhang, Fei Chen, Hequn Xian
+
+Core idea: Improve RF fingerprinting for IoT device identification by exploiting the internal hardware-path structure of a transmitter rather than treating the whole IQ signal as one blob. Raw IQ samples are decomposed into multiple dimensions (amplitude, phase, frequency offset, etc.) that each map to a different physical sub-circuit (oscillator, mixer, power amplifier). A novel Fingerprint Strengthen Layer (FSL) extracts features from each path independently, then an attention-based fusion module weights and merges them into a single enhanced fingerprint vector. Validated on the public ORACLE dataset (16 Ettus USRP X310 transmitters with identical configurations — "bit-similar" devices), achieving 99.33% identification accuracy, outperforming flat CNN baselines that treat the signal as a single-channel input.
+
+What it brings to the table:
+
+Provides a principled way to tell apart devices that look identical at the protocol level — exactly the problem you face when your ESP32 scan returns five "ESP32-CAM" SSIDs with similar MACs and you need to know which one is the spy camera vs. a legitimate IoT gadget.
+Attention-based fusion is a design pattern you could adapt: your system already fuses WiFi RSSI + BLE RSSI + compass heading; MRFE shows how to learn which signal dimensions matter most rather than weighting them by hand.
+Physical-layer fingerprints are much harder to spoof than MAC addresses or SSIDs — gives a stronger authentication signal than anything your current scan collects.
+
+Key limitations:
+
+Requires raw IQ samples — the standard ESP32 WiFi/BLE stack exposes only RSSI (a scalar), not the underlying IQ waveform. Extracting IQ data would need either a different radio front-end (e.g., an RTL-SDR dongle) or custom ESP32 firmware using the proprietary Wi-Fi CSI API, which gives partial channel info but not true raw IQ.
+Lab-grade dataset — ORACLE uses high-end USRP software-defined radios transmitting clean, controlled waveforms. Real-world spy cameras are cheap consumer boards with noisy, variable RF front-ends; fingerprint stability and cross-environment generalization are open questions.
+Compute cost — the FSL + attention pipeline is a multi-layer deep network trained on GPU; running inference on an ESP32's 240 MHz dual-core CPU is infeasible without heavy quantization/pruning, and even then latency would likely be seconds per device, not real-time.
+Closed-set assumption — the model classifies among a known, enrolled set of 16 devices. In the field your scanner encounters arbitrary unknown devices; open-set recognition (flagging novel/suspicious transmitters) is not addressed.
+
+Bottom line: strongest theoretical foundation for "which device is the spy camera?" among the RF papers reviewed, but the gap between USRP lab conditions and ESP32-in-a-hotel-room is large. Most useful as a research direction to cite for future work — if you ever upgrade to a platform that exposes IQ data (e.g., ESP32 CSI + an SDR sniffer), the FSL concept maps directly onto your multi-signal fusion architecture.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 6: RSSI-Based Indoor Localization With the Internet of Things
+################################################################################
+• Complete Paper Name : RSSI-Based Indoor Localization With the Internet of Things
+• Publication / Type  : IEEE Access, Vol. 6 (DOI: 10.1109/ACCESS.2018.2843325)
+• Year                : 2018
+• Authors             : Sebastian Sadowski, Petros Spachos (School of Engineering, University of Guelph, Canada)
+• Local PDF File      : Research_Papers/Paper_6/RSSI-Based_Indoor_Localization_With_the_Internet_of_Things.pdf
+• Assigned Reviewer   : Saamarth S
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+RSSI-Based Indoor Localization With the Internet of Things
+
+IEEE Access, 2018 — Sebastian Sadowski, Petros Spachos (University of Guelph)
+
+Core idea: Head-to-head comparison of four IoT wireless technologies — WiFi (802.11n, 2.4 GHz), Bluetooth Low Energy (BLE), Zigbee, and LoRaWAN — for RSSI-based indoor positioning using trilateration. Three or more anchor nodes at known positions broadcast beacons; a receiver logs RSSI from each, converts RSSI → estimated distance via a log-distance path-loss model, and triangulates position. Experiments ran in two environments: a large, high-interference research lab and a smaller, low-noise meeting room. Key result: WiFi delivered the best raw accuracy but at far higher power draw; BLE offered the best accuracy-per-milliwatt trade-off; Zigbee and LoRaWAN lagged in accuracy but excel in range/battery life for asset-tracking use cases.
+
+What it brings to the table:
+
+Directly validates the core signal your wireless radar already uses — RSSI — and quantifies how noisy it actually is across technologies you support (WiFi + BLE). This is the empirical backing for why your gradient-ascent algorithm needs momentum smoothing and sector averaging rather than trusting raw readings.
+Trilateration math is the natural next step beyond your current single-point "getting warmer / colder" heuristic — if you ever add a second or third ESP32 anchor, this paper gives the algorithm and expected error bounds.
+Confirms the WiFi-vs-BLE accuracy–power trade-off: WiFi is more precise but drains the ESP32 faster, BLE is noisier but much cheaper on battery — explains why your scan intervals differ (3s WiFi, 5s BLE).
+The two-environment test (high-noise lab vs. quiet room) mirrors your real deployment: a hotel room is small/quiet like the meeting room, but a hostel corridor or Airbnb common area is noisier — gives you expectations for both.
+
+Key limitations:
+
+Trilateration needs ≥3 anchors at known, fixed positions — your system has exactly one ESP32 that the user carries around, so classic trilateration doesn't directly apply; you'd need a fundamentally different deployment model (multiple fixed ESP32 beacons) or rely on sequential measurements as the user moves (which is what your sector-averaging does, but without formal geometric guarantees).
+Log-distance path-loss model is environment-specific — the paper fits path-loss exponents per-room, but those constants change with furniture, wall materials, and human-body shadowing. No automatic calibration or transfer method is provided, so accuracy degrades if you just copy their exponents into a different hotel room.
+Static scenario only — all measurements taken with transmitter and receiver stationary. Your user is walking/rotating while scanning, introducing Doppler shifts and body-shadowing dynamics the paper doesn't model.
+No device classification — the paper treats all transmitters as cooperative anchors. It never asks "is this transmitter a spy camera?", only "where is this known beacon?". The identification step (friend vs. foe) is entirely out of scope.
+2018 hardware/firmware — results are from first-gen BLE 4.x beacons and 2.4 GHz-only WiFi. Modern BLE 5.x (which the ESP32-S3 NimBLE stack supports) has improved RSSI stability and range; WiFi 6 has better channel estimation. The absolute accuracy numbers may be pessimistic for current hardware.
+
+Bottom line: the most directly relevant "building-block" paper for your wireless radar — it doesn't detect cameras, but it rigorously quantifies the signal (RSSI) and algorithm (trilateration) your system is built on. Best used to justify your design choices (why momentum-smoothed sector averaging, why different WiFi/BLE poll rates) and to frame the research gap: existing RSSI localization assumes cooperative anchors at known positions — your contribution is adapting it to a single mobile scanner hunting a non-cooperative, unknown-position target.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 7: AI-aided Hidden Camera Detection and Localization based on Raw IoT Network Traffic
+################################################################################
+• Complete Paper Name : AI-aided Hidden Camera Detection and Localization based on Raw IoT Network Traffic
+• Publication / Type  : IEEE LCN (47th IEEE Conference on Local Computer Networks)
+• Year                : 2022
+• Authors             : Jihyeon Lee, Sangwon Seo, Taehun Yang, Soochang Park (KAIST, Korea University, Chungbuk National University)
+• Local PDF File      : Research_Papers/Paper_7/AI-aided_Hidden_Camera_Detection_and_Localization_based_on_Raw_IoT_Network_Traffic.pdf
+• Assigned Reviewer   : Saamarth S
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+AHCL (AI-aided Hidden Camera Detection and Localization based on Raw IoT Network Traffic)
+
+IEEE 47th Conference on Local Computer Networks (LCN), 2022 — Jihyeon Lee, Sangwon Seo, Taehun Yang, Soochang Park
+
+Core idea: Detect and locate hidden cameras purely from network traffic analysis — no physical hardware scanner needed. The system monitors raw packets at the router level, applies a Support Vector Machine (SVM) to filter out video-streaming traffic from background noise, feeds the filtered stream through a Denoising Autoencoder (DAE) to clean up noisy/fragmented captures, and finally classifies the cleaned features with an Ensemble Neural Network to decide (a) whether a hidden camera is streaming and (b) which network segment it's on. Dataset: 60,412 labelled packets (normal vs. video-streaming). Best ensemble model hit 98.27% detection accuracy; the paper also reports 99.5% in a more controlled subset.
+
+What it brings to the table:
+
+Entirely complementary detection modality — your system looks for RF presence (WiFi/BLE scan) and optical signatures (IR blink); AHCL looks at what the traffic is carrying. A spy camera can have a perfectly normal-looking SSID and RSSI but still be identified by its traffic pattern (continuous upstream video bitrate ≫ typical IoT telemetry).
+Zero extra hardware — runs on existing router/AP infrastructure or even a laptop in monitor mode, which your ESP32 in STA mode could partially emulate by sniffing promiscuous-mode packets.
+The SVM → DAE → Ensemble pipeline is a clean three-stage architecture you could reference as a design template for your own classification chain (scan → filter → score → alert).
+
+Key limitations:
+
+Network access required — the system must be on the same LAN as the spy camera (or at least able to see its packets). In a hotel room you typically can't access the router; your ESP32 runs its own AP so you'd only see traffic from devices that join your network, not from a camera streaming over the hotel WiFi. Promiscuous/monitor-mode sniffing on the ESP32 is possible but limited (no full 802.11 decryption of third-party traffic without the WPA key).
+Encrypted traffic blind spots — modern spy cameras streaming over HTTPS/SRTP/QUIC encrypt payload; the SVM/DAE pipeline relies partly on packet-level features that may be opaque under encryption. The paper tests on unencrypted or lightly-encrypted streams; a camera using end-to-end encrypted cloud upload (e.g., via a commercial app) would look like generic TLS traffic.
+No wired/SD-card camera coverage — exactly the same gap as your RF radar: if the camera doesn't transmit over the network at all, it's invisible.
+Static, controlled environment — the 60k-packet dataset was collected in a lab setup. Real hotel/Airbnb networks have vastly more diverse background traffic (smart TVs, streaming sticks, other guests' phones), which would raise the false-positive rate. Cross-environment generalization is not validated.
+Localization is coarse — "which network segment" is not "which corner of the room." The paper doesn't provide sub-room spatial resolution; you'd still need your RSSI-gradient or compass-guided approach to physically walk to the device.
+
+Bottom line: the strongest "software-only, no-new-hardware" detection paper in the set. Best cited as evidence that traffic analysis can catch streaming cameras your RF presence scan might miss (normal-looking SSID/RSSI but anomalous bitrate), while honestly noting the deployment barrier — you need LAN-level packet visibility, which a user in a hotel room usually doesn't have. If you ever add a "connected to hotel WiFi" mode, the SVM traffic filter is a concrete feature to implement.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 8: FingerBLE: A Device Fingerprint Identification Scheme for BLE Devices
+################################################################################
+• Complete Paper Name : FingerBLE: A Device Fingerprint Identification Scheme for BLE Devices
+• Publication / Type  : IEEE ICPADS (IEEE International Conference on Parallel and Distributed Systems)
+• Year                : 2023
+• Authors             : Xikai Sun, Fan Dang (Department of Automation & Global Innovation Exchange, Tsinghua University)
+• Local PDF File      : Research_Papers/Paper_8/FingerBLE_A_Device_Fingerprint_Identification_Scheme_for_BLE_devices.pdf
+• Assigned Reviewer   : Saamarth S
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+FingerBLE (A Device Fingerprint Identification Scheme for BLE Devices)
+
+IEEE ICPADS 2023 — Xikai Sun, Fan Dang (Tsinghua University)
+
+Core idea: Authenticate BLE devices using physical-layer hardware fingerprints rather than protocol-level identifiers (MAC address, device name) that can be trivially cloned or randomized. Every BLE radio chip has unique manufacturing imperfections — Carrier Frequency Offset (CFO) from crystal-oscillator variance, IQ imbalance (amplitude/phase mismatch between the in-phase and quadrature branches), power-amplifier non-linearity, and oscillator phase noise. FingerBLE captures raw IQ samples from BLE advertisement packets, applies pre-emphasis → framing → windowing → FFT, then feeds the frequency-domain representation through a hybrid filter bank that emphasizes the spectral regions most affected by these hardware imperfections. A classifier trained on these emphasized features builds a fingerprint database; incoming BLE transmissions are matched against this database to verify device identity. The scheme achieved high identification accuracy across a set of BLE devices without requiring any modification to the BLE protocol stack.
+
+What it brings to the table:
+
+Directly addresses a weakness in your BLE scan — right now your ESP32 NimBLE scan reports device name + RSSI, both of which an attacker can spoof. If you could fingerprint the physical radio chip, a cloned-name spy camera would still be distinguishable from a legitimate device because its hardware imperfections won't match.
+CFO is already partially observable on the ESP32 — the NimBLE stack doesn't expose raw IQ, but frequency offset can be estimated from the BLE preamble/sync-word correlation. This is the lowest-hanging fruit for adding a fingerprinting signal to your existing scan without new hardware.
+The hybrid filter bank concept — selectively weighting frequency bins where hardware variation is strongest — is a clean, interpretable feature-engineering approach you could adapt even with limited spectral resolution from the ESP32.
+
+Key limitations:
+
+Requires raw IQ capture — FingerBLE's full pipeline needs IQ samples from the BLE physical layer, which the ESP32's standard NimBLE stack does not expose. You'd need either (a) a software-defined radio (e.g., an HackRF or ADALM-PLUTO) as a sniffer, adding hardware cost and complexity, or (b) custom ESP32 firmware using undocumented radio registers to dump baseband samples — fragile and not guaranteed across chip revisions.
+Closed-set enrollment — like MRFE, the system classifies among a pre-enrolled set of known devices. In your scenario the spy camera is a novel, never-before-seen device; you'd need open-set anomaly detection ("this BLE fingerprint doesn't match any known-good device in the room") rather than closed-set classification ("this is Device #7").
+Environmental sensitivity — RF fingerprints can drift with temperature, battery voltage, and multipath propagation. The paper validates in a controlled indoor setting; a hotel room with different walls, furniture, and interference patterns may degrade fingerprint stability, especially for CFO which is temperature-dependent.
+BLE-only — the scheme is specific to BLE advertisement channels (37/38/39 at 2402/2426/2480 MHz). Spy cameras streaming over WiFi (2.4 GHz data channels or 5 GHz) are entirely out of scope; you'd need a separate WiFi fingerprinting approach (like MRFE or CSI-based methods).
+Latency — the FFT + filter-bank + classifier pipeline assumes offline or near-offline processing of captured IQ buffers. Real-time per-advertisement fingerprinting at BLE's 20ms–10s advertisement interval is tight, especially on constrained hardware.
+
+Bottom line: the most directly actionable BLE-security paper in the set for your project's threat model (spoofed device names/MACs). The full IQ pipeline is out of reach on your current ESP32 hardware, but the CFO-estimation subset is feasible and would add a meaningful "is this really the same device?" signal to your BLE scan. Best cited to motivate a future "BLE fingerprint verification" module and to articulate the gap: existing BLE fingerprinting assumes cooperative enrollment — your contribution would be adapting it to adversarial, zero-enrollment detection of unknown spy devices.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 9: Wireless Spy Camera Spotter System With Real-Time Traffic Similarity Analysis and WiFi Signal Tracing
+################################################################################
+• Complete Paper Name : Wireless Spy Camera Spotter System With Real-Time Traffic Similarity Analysis and WiFi Signal Tracing
+• Publication / Type  : IEEE Access, Vol. 12 (DOI: 10.1109/ACCESS.2024.3350175)
+• Year                : 2024
+• Authors             : Hyeyoung An, Woojin Park, Soochang Park (Department of Computer Engineering, Chungbuk National University)
+• Local PDF File      : Research_Papers/Paper_9/Wireless_Spy_Camera_Spotter_System_With_Real-Time_Traffic_Similarity_Analysis_and_WiFi_Signal_Tracing.pdf
+• Assigned Reviewer   : Amogh Neeli
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+IEEE → 2024
+
+Wireless Spy Camera Spotter System With Real-Time Traffic Similarity Analysis and WiFi Signal Tracing
+
+What the paper is about
+
+It proposes a software-based framework for detecting Wi-Fi-enabled spy cameras that are actively transmitting video. The system captures nearby network packets, classifies streaming traffic, uses the Nilsimsa similarity algorithm to identify repeated traffic patterns associated with cameras, and then uses Wi-Fi RSSI to approximately locate the suspected camera. The authors claim detection and localization without extensive training data or specialized CSI hardware.
+
+The strongest gaps for your project
+
+If you want to keep the literature review short, I'd specifically retain these 5:
+
+Only detects actively transmitting Wi-Fi cameras → doesn't cover offline/SD-card cameras.
+RSSI provides approximate localization → affected by multipath and environmental interference.
+No optical/IR detection → no independent physical lens-detection mechanism.
+No directional user guidance → gives approximate location but doesn't guide the user toward the source.
+Limited real-world generalization → evaluation is based on specific hardware and controlled environments.
+------------------------------------------------------------------------------------------------------
+
+
+################################################################################
+PAPER 10: Real-Time Sensing and On-Site Spotting Scheme of Multi-Type WLAN Spycams
+################################################################################
+• Complete Paper Name : Real-Time Sensing and On-Site Spotting Scheme of Multi-Type WLAN Spycams
+• Publication / Type  : IEEE Access, Vol. 12 (DOI: 10.1109/ACCESS.2024.3482429)
+• Year                : 2024
+• Authors             : Hyeyoung An, Woojin Park, Soochang Park (Department of Computer Engineering, Chungbuk National University)
+• Local PDF File      : Research_Papers/Paper_10/Real-Time_Sensing_and_On-Site_Spotting_Scheme_of_Multi-Type_WLAN_Spycams.pdf
+• Assigned Reviewer   : Team Research Review
+
+---------------------------------------- COMPLETE REPORT TEXT ----------------------------------------
+IEEE → 2024
+
+Real-Time Sensing and On-Site Spotting Scheme of Multi-Type WLAN Spycams
+What the paper is about
+
+It proposes a real-time system for detecting and approximately locating wireless video-surveillance devices, including IP cameras and drones. The system captures Wi-Fi packets using a monitoring-mode adapter, groups packets based on source/destination information, applies the Nilsimsa hashing algorithm to identify repeated traffic patterns associated with video transmission, and then uses RSSI + the Log-Distance Path Loss (LDPL) model to estimate the device's distance.
+
+The main objective is to avoid the need for large location-specific datasets, machine-learning training, and specialized CSI hardware. The authors report that their system can determine the presence of a wireless video device within 3 seconds, with an average localization error of approximately 0.08 m within 1 m and 0.45 m within 3 m.
+
+The most important gaps for YOUR project
+
+If you're making a concise literature review, I'd use these 6:
+
+Only wireless video-transmitting devices → cannot detect offline/SD-card cameras.
+No optical/IR detection → doesn't physically detect a hidden camera lens or IR signature.
+RSSI localization has environmental limitations → multipath, shadowing, reflection and increasing error with distance.
+No precise directional navigation → the authors themselves identify improving direction accuracy as future work.
+Limited device/environment validation → only a small number of cameras and one drone were experimentally evaluated.
+Requires Wi-Fi monitor-mode hardware → their implementation uses Raspberry Pi + external Wi-Fi adapter and is demonstrated only on 2.4 GHz.
+------------------------------------------------------------------------------------------------------
+
