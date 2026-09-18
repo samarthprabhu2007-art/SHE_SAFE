@@ -1,0 +1,24 @@
+No detection app that works entirely on the user's phone.
+
+ Most systems rely on cloud servers or external hardware for processing.
+
+
+Existing systems address either wired or wireless cameras, not both. 
+
+No single portable tool covers both threat categories simultaneously.
+
+
+Detection systems confirm presence but offer no physical navigation to the source.
+
+ Users are alerted but receive no guidance to physically locate the device.
+
+
+Existing solutions require expensive or specialized hardware. 
+
+Custom accessories and flagship sensors make most systems inaccessible to everyday users.
+
+
+Existing systems treat all detected devices as equally suspicious. No differentiation between a spy camera and a legitimate nearby device.
+
+
+Existing optical systems degrade under normal ambient lighting. 

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEGIS — Project Checklist</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1a2e; --muted:#5b5b6b; --card:#f6f7fb;
+    --accent:#4b3fdb; --accent-soft:#eeecfc; --border:#e2e2ea; --green:#1b9c5b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#12121a; --fg:#eceaf7; --muted:#a3a3b5; --card:#1c1c28;
+      --accent:#9d90ff; --accent-soft:#262244; --border:#2c2c3c; --green:#4fce8f;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#12121a; --fg:#eceaf7; --muted:#a3a3b5; --card:#1c1c28;
+    --accent:#9d90ff; --accent-soft:#262244; --border:#2c2c3c; --green:#4fce8f;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    line-height:1.5; padding-bottom:70px;
+  }
+  header{ padding:26px 20px 14px; text-align:center; border-bottom:1px solid var(--border); }
+  header h1{ margin:0 0 4px; font-size:1.4rem; }
+  header p{ margin:0; color:var(--muted); font-size:0.85rem; }
+  .wrap{ max-width:720px; margin:0 auto; padding:0 16px; }
+  .progress-overall{ max-width:720px; margin:16px auto 0; padding:0 16px; }
+  .bar-track{ height:8px; border-radius:5px; background:var(--card); border:1px solid var(--border); overflow:hidden; }
+  .bar-fill{ height:100%; background:var(--accent); width:0%; transition:width .25s; }
+  .progress-label{ font-size:0.8rem; color:var(--muted); margin-top:6px; text-align:right; }
+  .tabs{ display:flex; gap:6px; padding:16px 16px 0; max-width:720px; margin:0 auto; }
+  .tab{
+    flex:1; text-align:center; font-size:0.85rem; font-weight:600; padding:10px 8px;
+    border-radius:10px; background:var(--card); border:1px solid var(--border);
+    color:var(--muted); cursor:pointer; user-select:none;
+  }
+  .tab.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  section.group{ margin-top:20px; }
+  section.group.hidden{ display:none; }
+  ul.items{ list-style:none; margin:0; padding:0; }
+  li.item{
+    background:var(--card); border:1px solid var(--border); border-radius:10px;
+    margin-bottom:8px; padding:12px 13px; display:flex; gap:10px; align-items:flex-start; cursor:pointer;
+  }
+  li.item.done{ opacity:0.55; }
+  li.item.done .txt{ text-decoration:line-through; }
+  .box{
+    flex-shrink:0; width:20px; height:20px; border-radius:6px; border:2px solid var(--border);
+    margin-top:1px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; color:#fff;
+  }
+  li.item.done .box{ background:var(--green); border-color:var(--green); }
+  .txt{ font-size:0.93rem; }
+  .savebar{
+    position:fixed; bottom:0; left:0; right:0; background:var(--bg);
+    border-top:1px solid var(--border); padding:12px 16px; display:flex; gap:10px;
+    justify-content:center; flex-wrap:wrap;
+  }
+  button.action{
+    font-size:0.85rem; font-weight:600; padding:10px 16px; border-radius:10px;
+    border:1px solid var(--border); background:var(--accent); color:#fff; cursor:pointer;
+  }
+  button.action.secondary{ background:var(--card); color:var(--fg); }
+  .hint{
+    max-width:720px; margin:14px auto 0; padding:0 16px; font-size:0.78rem; color:var(--muted); text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AEGIS — Project Checklist</h1>
+  <p>Hardware · Software · Others — tap an item to check it off</p>
+</header>
+
+<div class="progress-overall">
+  <div class="bar-track"><div class="bar-fill" id="overallBar"></div></div>
+  <div class="progress-label" id="overallLabel">0 / 0 done</div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+<div class="wrap" id="content"></div>
+
+<p class="hint">
+  Checkmarks auto-save in this browser. Click <b>"Save checklist file"</b> to download an updated copy
+  with your progress baked in — that's the file to commit/share so progress never resets for
+  whoever opens it next.
+</p>
+
+<div class="savebar">
+  <button class="action" id="saveFileBtn">💾 Save checklist file</button>
+  <button class="action secondary" id="resetBtn">Reset all</button>
+</div>
+
+<script id="checklist-data" type="application/json">
+{
+  "Software": [
+    { "t": "Mobile App", "done": false },
+    { "t": "SOS button inside app", "done": false },
+    { "t": "Code word feature instead of SOS (smart SOS)", "done": false },
+    { "t": "Directioning feature (AI or math logic implementation)", "done": false },
+    { "t": "Hit wall implementation", "done": false },
+    { "t": "Prediction — is the signal coming from inside or outside the room", "done": false },
+    { "t": "Gyrometer readings, attach with the radar", "done": false },
+    { "t": "Remember IP feature, to prevent rescan", "done": false },
+    { "t": "Study pattern from RF to decide what is suspicious", "done": false }
+  ],
+  "Hardware": [
+    { "t": "Buy hardware", "done": false },
+    { "t": "Connect all the hardware", "done": false }
+  ],
+  "Others": [
+    { "t": "Final testing", "done": false },
+    { "t": "Research paper", "done": false }
+  ]
+}
+</script>
+
+<script>
+const STORAGE_KEY = 'aegis_checklist_state_v1';
+
+// 1. Load baked-in state from the script block (this is what makes the
+//    downloaded file "remember" progress even with no browser storage at all).
+const bakedIn = JSON.parse(document.getElementById('checklist-data').textContent);
+
+// 2. If this browser also has a newer localStorage copy for this file, prefer that
+//    (covers the case: open file -> check some boxes -> reopen same file without re-saving).
+let data = bakedIn;
+try{
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if(raw) data = JSON.parse(raw);
+}catch(e){ /* ignore, fall back to baked-in state */ }
+
+const tabNames = Object.keys(data);
+const tabsEl = document.getElementById('tabs');
+const content = document.getElementById('content');
+
+function persistLocal(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){ /* best effort */ }
+}
+
+function renderTabs(){
+  tabNames.forEach((name, i) => {
+    const t = document.createElement('div');
+    t.className = 'tab' + (i === 0 ? ' active' : '');
+    t.textContent = name;
+    t.dataset.idx = i;
+    tabsEl.appendChild(t);
+  });
+  tabsEl.addEventListener('click', e => {
+    if(!e.target.classList.contains('tab')) return;
+    [...tabsEl.children].forEach(c => c.classList.remove('active'));
+    e.target.classList.add('active');
+    const idx = e.target.dataset.idx;
+    document.querySelectorAll('section.group').forEach(sec => {
+      sec.classList.toggle('hidden', sec.dataset.idx !== idx);
+    });
+  });
+}
+
+function render(){
+  content.innerHTML = '';
+  tabNames.forEach((name, ti) => {
+    const section = document.createElement('section');
+    section.className = 'group' + (ti === 0 ? '' : ' hidden');
+    section.dataset.idx = ti;
+    const ul = document.createElement('ul');
+    ul.className = 'items';
+    data[name].forEach((item, ii) => {
+      const li = document.createElement('li');
+      li.className = 'item' + (item.done ? ' done' : '');
+      li.innerHTML = `<span class="box">${item.done ? '✓' : ''}</span><span class="txt">${item.t}</span>`;
+      li.addEventListener('click', () => {
+        item.done = !item.done;
+        persistLocal();
+        li.classList.toggle('done', item.done);
+        li.querySelector('.box').textContent = item.done ? '✓' : '';
+        updateCounts();
+      });
+      ul.appendChild(li);
+    });
+    section.appendChild(ul);
+    content.appendChild(section);
+  });
+  updateCounts();
+}
+
+function updateCounts(){
+  let total = 0, done = 0;
+  tabNames.forEach(name => {
+    data[name].forEach(item => { total++; if(item.done) done++; });
+  });
+  document.getElementById('overallBar').style.width = total ? (done/total*100) + '%' : '0%';
+  document.getElementById('overallLabel').textContent = `${done} / ${total} done`;
+}
+
+// "Save checklist file" — regenerates this exact HTML document with the
+// current checked/unchecked state written into the checklist-data script
+// block, then downloads it. That downloaded file carries the state with
+// it wherever it's opened next — a fresh browser, a teammate's machine,
+// or after being pulled from a repo — no localStorage needed on the other end.
+document.getElementById('saveFileBtn').addEventListener('click', async () => {
+  const doc = document.documentElement.cloneNode(true);
+  const dataScript = doc.querySelector('#checklist-data');
+  dataScript.textContent = JSON.stringify(data, null, 2);
+  const html = '<!DOCTYPE html>\n' + doc.outerHTML;
+
+  // Prefer native "save/overwrite this exact file" dialog where supported (Chrome/Edge).
+  if(window.showSaveFilePicker){
+    try{
+      const handle = await window.showSaveFilePicker({
+        suggestedName: 'aegis_checklist.html',
+        types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(html);
+      await writable.close();
+      return;
+    }catch(e){
+      // user cancelled the picker or API failed — fall through to plain download
+    }
+  }
+
+  // Universal fallback: trigger a normal file download.
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'aegis_checklist.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  if(!confirm('Reset all checkmarks?')) return;
+  tabNames.forEach(name => data[name].forEach(item => item.done = false));
+  persistLocal();
+  render();
+});
+
+renderTabs();
+render();
+</script>
+
+</body>
+</html>
