@@ -1,37 +1,54 @@
 CONTEXT PROMPT FOR AI — READ BEFORE HELPING WITH THIS PROJECT
 
-You are being asked to help with a personal-safety / covert-camera-detection device built by a 4-person student team (Samarth Prabhu, Amogh Neeli, Saamarth S, Prajwal V Jois) as an RVCE Semester 3 Experiential Learning (EL) project. It began as their project for the "sheSafe" hackathon, where it won 1st prize — note that "sheSafe" is the name of the hackathon, not the device itself; the device does not yet have a finalized name. The team is now upgrading it toward a more robust, research-grade implementation. Read this entire prompt before writing or suggesting any code — it explains what already exists so you don't duplicate or contradict working functionality.
+You are being asked to help with a personal-safety / covert-camera-detection device built by a 4-person student team (Samarth Prabhu, Amogh Neeli, Saamarth S, Prajwal V Jois) as an RVCE Semester 3 Experiential Learning (EL) project. It began as their project for the "sheSafe" hackathon, where it won 1st prize — note that "sheSafe" is the name of the hackathon, not the device itself; the device does not yet have a finalized name. The team is now upgrading it toward a more robust, research-grade implementation. Read this entire prompt before writing or suggesting any code — it explains what already exists and what has recently changed, so you don't duplicate or contradict working functionality or plan against an outdated architecture.
 
-WHAT THE SYSTEM DOES
-This device detects hidden/spy cameras in a room using only an ESP32 microcontroller and the user's smartphone (no app install, no cloud, no home Wi-Fi dependency). It has two detection subsystems plus an emergency alert feature, all served from one ESP32-hosted web dashboard:
+⚠️ UPDATE NOTES — ARCHITECTURE HAS CHANGED SINCE THE ORIGINAL BUILD The sections below (marked "AS ORIGINALLY BUILT") describe the hackathon-era implementation. Two significant changes have since been decided:
 
-1. WIRELESS CAMERA RADAR — detects spy cameras that transmit over Wi-Fi or BLE, and guides the user toward the source using directional signal-strength tracking.
-2. WIRED CAMERA DETECTOR — detects offline/SD-card spy cameras using the phone's camera and real-time in-browser computer vision to catch the IR LED glow + blink pattern these cameras emit.
-3. EMERGENCY SOS — a GPS-based panic button that sends WhatsApp alerts to a trusted contact.
+Platform shift: ESP32-hosted browser dashboard → standalone phone app. Originally, the entire dashboard was a single HTML/CSS/JS page served directly from the ESP32 (via PROGMEM) and opened in the phone's browser — no app install, ESP32 was the web server. The team is now moving the software layer OFF the ESP32 and into its own standalone web app project (HTML/CSS/JS), which will be packaged into an installable Android app using Capacitor. The ESP32 keeps only the hardware-facing role: reading sensors and exposing readings over Wi-Fi (still as a JSON REST API, e.g. GET /wifi, GET /ble, or whatever the RF sensor's equivalent endpoint becomes — see point 2). The phone app becomes the client that fetches this data, runs all the direction/CV/SOS logic, and is installed as a real app icon (no visible browser chrome) rather than opened as a URL.
+Reasoning: RF/Bluetooth scanning stays server-side on the ESP32 (or via a dedicated RF sensor — see below), so the phone side never needs native Bluetooth permissions or Web Bluetooth API support, which is unreliable on Android and unsupported on iOS. This keeps the phone app to plain browser APIs (fetch/WebSocket, camera, gyroscope, geolocation) wrapped by Capacitor for native packaging.
+Current code status: only an arduino.ino file exists for the ESP32 so far. The phone-app codebase (HTML/CSS/JS + Capacitor project) has not been started yet.
+⚠️ UNRESOLVED: Wireless detection method — software Wi-Fi/BLE scan vs. physical RF sensor. The original build (Section 3 below) scans Wi-Fi and BLE in software via WiFi.scanNetworks() and NimBLEDevice, entirely on the ESP32 — no dedicated RF hardware involved. However, the team has since referenced using a physical RF sensor module for wireless-camera detection instead. These are materially different approaches (protocol-level network scanning vs. broadband RF energy sensing), and it is not yet confirmed whether the RF sensor:
+(a) replaces the WiFi/BLE software scan entirely,
+(b) supplements it as an additional signal source, or
+(c) was a miscommunication and the original WiFi/BLE scan approach still stands. Do not assume which is current. If asked to modify the wireless radar's detection or direction logic, ask the team to confirm which hardware/software approach is actually in use before proposing changes — the gradient-ascent RSSI algorithm in Section 3.4 is written specifically around Wi-Fi/BLE scan RSSI values, and may need rethinking if a raw RF sensor (with a different signal characteristic) is the real data source.
 
-CURRENT TECH STACK (already built, working)
-- Firmware: ESP32 in Arduino/C++, using WiFi.h, WebServer.h, NimBLEDevice.h.
-- Concurrency: FreeRTOS dual-core split — Core 0 runs a background scanTask (Wi-Fi + BLE scanning), Core 1 runs the WebServer loop. A mutex semaphore (jsonMutex) protects shared JSON strings (wifiJson, bleJson) between cores.
-- REST endpoints exposed by the ESP32: GET /wifi, GET /ble, GET /pir-status, GET /trigger-whatsapp (and / serving the dashboard HTML).
-- Dashboard: a single embedded HTML/CSS/JS page (stored via PROGMEM, chunk-streamed to the browser) with two switchable modes (Wireless Radar / Wired Detector), canvas-based radar and signal-plot visualizations, and a shared console log.
-- Directional guidance (wireless mode): 8 compass sectors (45° each), gyroscope/compass heading via the browser's deviceorientation API, gradient-ascent logic comparing RSSI trends per sector to guess the best direction, a "HIT WALL" feature that blacklists a sector and suggests routing around it using neighboring sector data. FOUND state triggers at RSSI ≥ -50 dBm.
-- CV pipeline (wired mode): getUserMedia camera capture → downsample to 320×240 → RGB-to-HSL pixel filtering for magenta/pink IR signature → BFS blob clustering (rejects blobs >250px or >50×50 bounding box) → rolling 5.5s brightness history per blob → blink-transition consistency check (rate + jitter) → threat score 0–100 → alarm + WhatsApp trigger at threat score ≥75.
-- Alerts: sent directly from the browser via a client-side fetch() POST to a Green API WhatsApp gateway endpoint (not sent through the ESP32 itself — the ESP32's own /trigger-whatsapp handler is currently just a Serial-log simulation, not a live send).
-- SOS button: HTML5 Geolocation API fetches GPS coordinates; if denied/unavailable, the alert is still sent immediately labeled "Location Unavailable" rather than delayed.
-- Networking: ESP32 runs its own Access Point (WiFi.softAP) for the dashboard, and also joins a phone's mobile hotspot in the background for internet-dependent features (Green API calls, made from the browser).
+WHAT THE SYSTEM DOES (unchanged) This device detects hidden/spy cameras in a room using an ESP32 (as a sensor hub) and the user's smartphone (running the app). It has two detection subsystems plus an emergency alert feature:
+
+WIRELESS CAMERA RADAR — detects spy cameras that transmit over Wi-Fi/BLE (or via RF sensor — see unresolved item above), and guides the user toward the source using directional signal-strength tracking.
+WIRED CAMERA DETECTOR — detects offline/SD-card spy cameras using the phone's camera and real-time in-browser computer vision to catch the IR LED glow + blink pattern these cameras emit.
+EMERGENCY SOS — a GPS-based panic button that sends WhatsApp alerts to a trusted contact.
+
+CURRENT TECH STACK
+
+AS ORIGINALLY BUILT (hackathon version — being migrated away from, see Update Note 1):
+
+Firmware: ESP32 in Arduino/C++, using WiFi.h, WebServer.h, NimBLEDevice.h.
+Concurrency: FreeRTOS dual-core split — Core 0 runs a background scanTask (Wi-Fi + BLE scanning), Core 1 runs the WebServer loop. A mutex semaphore (jsonMutex) protects shared JSON strings (wifiJson, bleJson) between cores.
+REST endpoints exposed by the ESP32: GET /wifi, GET /ble, GET /pir-status, GET /trigger-whatsapp (and / serving the dashboard HTML).
+Dashboard: a single embedded HTML/CSS/JS page (stored via PROGMEM, chunk-streamed to the browser), opened directly in the phone's browser — this is the part being replaced by a standalone installable app.
+
+TARGET STACK (current plan):
+
+Firmware: ESP32 stays Arduino/C++. Keeps sensor-reading logic and exposes results as JSON over Wi-Fi (exact endpoints TBD pending Update Note 2). The dual-core FreeRTOS split (scan/sensor task on Core 0, web server on Core 1) likely still makes sense regardless of which sensing approach is used, to avoid blocking the server during a scan/read cycle — carry this pattern forward unless the RF-sensor approach turns out to need it.
+Phone app: standalone HTML/CSS/JS project (vanilla, no framework — matches existing style), packaged into an installable Android app via Capacitor. Fetches sensor JSON from the ESP32's IP, runs all client-side logic: direction/gradient-ascent guidance, the wired-detector CV pipeline, SOS/Geolocation, and Green API WhatsApp calls.
+The CV pipeline (Section 4), SOS/Geolocation flow (Section 5.1), and Green API alerting (Section 5.2) are UNCHANGED by the platform shift — they're standard browser APIs (getUserMedia, canvas, Geolocation, fetch) that work the same inside a Capacitor WebView as they did in a regular mobile browser. Capacitor plugins (camera, geolocation, motion) may be swapped in later if the plain browser APIs misbehave inside the native wrapper, but this is not required to start.
 
 KNOWN GAPS / MOCKED PARTS (do not assume these are "real" unless the user says they've upgraded them)
-- The wireless radar's directional demo uses a software-simulated fixed-bearing beacon (SPY_CAM_WIFI / SPY_BEACON_BLE at 90°) rather than a real triangulated signal, for demo purposes.
-- The ESP32's /trigger-whatsapp handler does not actually send WhatsApp messages — actual sending happens client-side via Green API.
+
+The wireless radar's directional demo used a software-simulated fixed-bearing beacon (SPY_CAM_WIFI / SPY_BEACON_BLE at 90°) rather than a real triangulated signal, for demo purposes — status under the RF-sensor question (Update Note 2) is unclear.
+The ESP32's /trigger-whatsapp handler does not actually send WhatsApp messages — actual sending happens client-side via Green API.
+The RF sensor vs. Wi-Fi/BLE-scan question (Update Note 2) is the single biggest open item — resolve this before doing significant work on the wireless radar module.
 
 CODING PREFERENCES
-- The student team's primary coding language is C++ (used for the ESP32 firmware). Default to C++ conventions/idioms for any embedded/firmware work unless told otherwise.
-- The existing dashboard frontend is vanilla HTML/CSS/JavaScript (no frameworks) — match that style unless asked to modernize the stack.
 
-GOAL OF THE CURRENT PHASE
-The team wants to take this from a hackathon-winning demo to a more "research level" project — meaning more rigor, less mocking/simulation, and ideally some form of evaluation or measurable accuracy, suitable for an academic EL deliverable. When helping, prioritize suggestions that:
-- Replace simulated/mocked components with real sensor or signal integration where feasible.
-- Improve robustness of existing algorithms (e.g., RSSI-based direction estimation, IR-blink false-positive rejection).
-- Add any evaluation, testing, or documentation that would make the project's claims more rigorous and defensible.
+The student team's primary coding language is C++ (used for the ESP32 firmware). Default to C++ conventions/idioms for any embedded/firmware work unless told otherwise.
+The phone app is vanilla HTML/CSS/JavaScript (no frameworks) — match that style unless asked to modernize the stack. Capacitor is used only as a packaging/wrapper layer (plus native plugins where genuinely needed), not as a reason to introduce a JS framework.
+
+GOAL OF THE CURRENT PHASE The team wants to take this from a hackathon-winning demo to a more "research level" project — meaning more rigor, less mocking/simulation, and ideally some form of evaluation or measurable accuracy, suitable for an academic EL deliverable. When helping, prioritize suggestions that:
+
+Resolve the RF-sensor-vs-software-scan question before building further on the wireless radar.
+Replace simulated/mocked components with real sensor or signal integration where feasible.
+Improve robustness of existing algorithms (e.g., RSSI-based direction estimation, IR-blink false-positive rejection).
+Add any evaluation, testing, or documentation that would make the project's claims more rigorous and defensible.
 
 Please read the accompanying "Complete_Description_of_Project.md" file for full algorithmic detail before proposing changes, so your suggestions build on — rather than conflict with — what is already implemented and working.

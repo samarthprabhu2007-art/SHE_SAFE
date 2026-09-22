@@ -33,9 +33,9 @@
   .bar-track{ height:8px; border-radius:5px; background:var(--card); border:1px solid var(--border); overflow:hidden; }
   .bar-fill{ height:100%; background:var(--accent); width:0%; transition:width .25s; }
   .progress-label{ font-size:0.8rem; color:var(--muted); margin-top:6px; text-align:right; }
-  .tabs{ display:flex; gap:6px; padding:16px 16px 0; max-width:720px; margin:0 auto; }
+  .tabs{ display:flex; gap:6px; padding:16px 16px 0; max-width:720px; margin:0 auto; flex-wrap:wrap; }
   .tab{
-    flex:1; text-align:center; font-size:0.85rem; font-weight:600; padding:10px 8px;
+    flex:1; min-width:70px; text-align:center; font-size:0.85rem; font-weight:600; padding:10px 8px;
     border-radius:10px; background:var(--card); border:1px solid var(--border);
     color:var(--muted); cursor:pointer; user-select:none;
   }
@@ -74,7 +74,7 @@
 
 <header>
   <h1>AEGIS — Project Checklist</h1>
-  <p>Hardware · Software · Others — tap an item to check it off</p>
+  <p>Hardware · Software · Others · Extra — tap an item to check it off</p>
 </header>
 
 <div class="progress-overall">
@@ -107,7 +107,9 @@
     { "t": "Prediction — is the signal coming from inside or outside the room", "done": false },
     { "t": "Gyrometer readings, attach with the radar", "done": false },
     { "t": "Remember IP feature, to prevent rescan", "done": false },
-    { "t": "Study pattern from RF to decide what is suspicious", "done": false }
+    { "t": "Study pattern from RF to decide what is suspicious", "done": false },
+    { "t": "AI that detects IR LED reflection", "done": false },
+    { "t": "AI that differentiates camera lens from other reflecting surfaces", "done": false }
   ],
   "Hardware": [
     { "t": "Buy hardware", "done": false },
@@ -116,6 +118,9 @@
   "Others": [
     { "t": "Final testing", "done": false },
     { "t": "Research paper", "done": false }
+  ],
+  "Extra": [
+    { "t": "Thermal camera to detect camera", "done": false }
   ]
 }
 </script>
@@ -127,12 +132,24 @@ const STORAGE_KEY = 'aegis_checklist_state_v1';
 //    downloaded file "remember" progress even with no browser storage at all).
 const bakedIn = JSON.parse(document.getElementById('checklist-data').textContent);
 
-// 2. If this browser also has a newer localStorage copy for this file, prefer that
-//    (covers the case: open file -> check some boxes -> reopen same file without re-saving).
+// 2. The file's own baked-in item list is always the source of truth for WHICH
+//    items/tabs exist (so new items I add always show up, even in a browser that
+//    already has older saved progress). We only borrow "done" checkmarks from
+//    localStorage, matched by item text, for items that still exist.
 let data = bakedIn;
 try{
   const raw = localStorage.getItem(STORAGE_KEY);
-  if(raw) data = JSON.parse(raw);
+  if(raw){
+    const saved = JSON.parse(raw);
+    Object.keys(data).forEach(tabName => {
+      const savedTab = saved[tabName];
+      if(!savedTab) return;
+      data[tabName].forEach(item => {
+        const match = savedTab.find(s => s.t === item.t);
+        if(match) item.done = match.done;
+      });
+    });
+  }
 }catch(e){ /* ignore, fall back to baked-in state */ }
 
 const tabNames = Object.keys(data);

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AEGIS — Hidden Camera Detector</title>
+  <style>
+    :root {
+      --bg-color: #0d0f17;
+      --card-bg: #161926;
+      --border-color: #262b3e;
+      --text-main: #f0f2f8;
+      --text-muted: #8c95b2;
+      --accent-blue: #3b82f6;
+      --accent-green: #10b981;
+      --sos-red: #ef4444;
+      --sos-hover: #dc2626;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Top Header Bar with Always-On SOS */
+    header {
+      background-color: var(--card-bg);
+      border-bottom: 1px solid var(--border-color);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 100;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand h1 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: #ffffff;
+    }
+
+    .brand span {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    /* Always-On SOS Button */
+    .sos-btn {
+      background-color: var(--sos-red);
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+      transition: transform 0.1s ease, background-color 0.2s ease;
+      animation: pulse-red 2s infinite;
+    }
+
+    .sos-btn:active {
+      transform: scale(0.95);
+      background-color: var(--sos-hover);
+    }
+
+    @keyframes pulse-red {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+      70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+
+    /* Dual Switch Mode System */
+    .mode-switch-container {
+      padding: 12px 16px;
+      background-color: var(--bg-color);
+      flex-shrink: 0;
+    }
+
+    .mode-switcher {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 4px;
+      display: flex;
+      gap: 4px;
+    }
+
+    .mode-tab {
+      flex: 1;
+      padding: 10px 8px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.85rem;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.25s ease;
+    }
+
+    .mode-tab.active {
+      background-color: var(--accent-blue);
+      color: #ffffff;
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+
+    /* Viewport Area */
+    main {
+      flex: 1;
+      padding: 0 16px 12px 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .view-panel {
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+      height: 100%;
+    }
+
+    .view-panel.active {
+      display: flex;
+    }
+
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .card-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    /* Placeholder Graphic Containers */
+    .canvas-placeholder {
+      width: 100%;
+      aspect-ratio: 1;
+      max-height: 280px;
+      background-color: #0b0d14;
+      border: 1px dashed var(--border-color);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      gap: 8px;
+      margin: 0 auto;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background-color: rgba(16, 185, 129, 0.15);
+      color: var(--accent-green);
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+    }
+
+    /* System Log Footer */
+    footer {
+      background-color: var(--card-bg);
+      border-top: 1px solid var(--border-color);
+      padding: 10px 16px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .log-line {
+      font-family: monospace;
+      color: #a0aec0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 80%;
+    }
+
+    /* Modal Styling */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(0, 0, 0, 0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-box {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      width: 100%;
+      max-width: 340px;
+      text-align: center;
+    }
+
+    .modal-box h2 {
+      color: var(--sos-red);
+      margin-bottom: 8px;
+    }
+
+    .modal-box p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-danger {
+      background-color: var(--sos-red);
+      color: white;
+    }
+
+    .btn-secondary {
+      background-color: var(--border-color);
+      color: var(--text-main);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Bar with Always-On SOS Button -->
+  <header>
+    <div class="brand">
+      <h1>AEGIS</h1>
+      <span>Covert Detector System</span>
+    </div>
+    <button class="sos-btn" id="sosBtn">
+      🚨 <span>SOS</span>
+    </button>
+  </header>
+
+  <!-- Dual Switch System -->
+  <div class="mode-switch-container">
+    <div class="mode-switcher">
+      <button class="mode-tab active" id="tabWireless">
+        📡 Wireless Radar
+      </button>
+      <button class="mode-tab" id="tabWired">
+        📷 Wired Detector
+      </button>
+    </div>
+  </div>
+
+  <!-- Main View Area -->
+  <main>
+    <!-- View 1: Wireless Camera Radar Mode -->
+    <div class="view-panel active" id="panelWireless">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <span class="card-title" style="margin-bottom: 0;">RF Sector Radar</span>
+          <span class="status-badge"><span class="status-dot"></span> Radar Ready</span>
+        </div>
+        <div class="canvas-placeholder" id="radarCanvasContainer">
+          <span style="font-size: 2rem;">📡</span>
+          <span>8-Sector Directional Radar</span>
+          <span style="font-size: 0.75rem; color: #5a657c;">(Wi-Fi / BLE Signal Gradient)</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Directional Guidance</div>
+        <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-blue); text-align: center; padding: 10px 0;">
+          STATUS: IDLE / WAITING FOR SCAN
+        </div>
+      </div>
+    </div>
+
+    <!-- View 2: Wired Camera Detector Mode (CV) -->
+    <div class="view-panel" id="panelWired">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <span class="card-title" style="margin-bottom: 0;">Optical IR Scanner</span>
+          <span class="status-badge" style="background-color: rgba(59, 130, 246, 0.15); color: var(--accent-blue);">
+            <span class="status-dot" style="background-color: var(--accent-blue);"></span> Camera Ready
+          </span>
+        </div>
+        <div class="canvas-placeholder" id="cameraCanvasContainer">
+          <span style="font-size: 2rem;">📷</span>
+          <span>IR Lens Blink Detector</span>
+          <span style="font-size: 0.75rem; color: #5a657c;">(320x240 Client-Side Computer Vision)</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Detection Threshold & Threat Score</div>
+        <div style="font-size: 0.85rem; color: var(--text-muted);">
+          Blink Analysis Score: <strong style="color: var(--text-main);">0%</strong> (No optical target detected)
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer System Log -->
+  <footer>
+    <div class="log-line" id="systemLog">SYS: AEGIS App initialized. Mode: Wireless Radar.</div>
+    <span style="font-size: 0.7rem; color: #4a5568;">v1.0</span>
+  </footer>
+
+  <!-- SOS Confirmation Modal -->
+  <div class="modal-overlay" id="sosModal">
+    <div class="modal-box">
+      <h2>🚨 Trigger Emergency SOS?</h2>
+      <p>This will fetch your live GPS location and send an immediate WhatsApp alert to emergency contacts.</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="sosCancel">Cancel</button>
+        <button class="btn btn-danger" id="sosConfirm">Send Alert</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Dual Switch Tabs Handler
+    const tabWireless = document.getElementById('tabWireless');
+    const tabWired = document.getElementById('tabWired');
+    const panelWireless = document.getElementById('panelWireless');
+    const panelWired = document.getElementById('panelWired');
+    const systemLog = document.getElementById('systemLog');
+
+    function logMessage(msg) {
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      systemLog.textContent = `[${time}] ${msg}`;
+    }
+
+    tabWireless.addEventListener('click', () => {
+      tabWireless.classList.add('active');
+      tabWired.classList.remove('active');
+      panelWireless.classList.add('active');
+      panelWired.classList.remove('active');
+      logMessage('Switched to Mode A: Wireless Camera Radar.');
+    });
+
+    tabWired.addEventListener('click', () => {
+      tabWired.classList.add('active');
+      tabWireless.classList.remove('active');
+      panelWired.classList.add('active');
+      panelWireless.classList.remove('active');
+      logMessage('Switched to Mode B: Wired IR Camera Detector.');
+    });
+
+    // SOS Modal Handler
+    const sosBtn = document.getElementById('sosBtn');
+    const sosModal = document.getElementById('sosModal');
+    const sosCancel = document.getElementById('sosCancel');
+    const sosConfirm = document.getElementById('sosConfirm');
+
+    sosBtn.addEventListener('click', () => {
+      sosModal.classList.add('active');
+    });
+
+    sosCancel.addEventListener('click', () => {
+      sosModal.classList.remove('active');
+    });
+
+    sosConfirm.addEventListener('click', () => {
+      sosModal.classList.remove('active');
+      logMessage('🚨 SOS Triggered! Fetching GPS coordinates...');
+      if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            logMessage(`🚨 GPS Acquired: ${lat.toFixed(4)}, ${lon.toFixed(4)}. Alert dispatched!`);
+            alert(`🚨 SOS ALERT DISPATCHED!\nLocation: https://maps.google.com/?q=${lat},${lon}`);
+          },
+          (err) => {
+            logMessage('🚨 GPS Failed/Denied. Sending fallback alert without location...');
+            alert('🚨 SOS ALERT DISPATCHED!\nLocation: Unavailable');
+          },
+          { timeout: 5000 }
+        );
+      } else {
+        alert('🚨 SOS ALERT DISPATCHED!\nLocation: Not Supported');
+      }
+    });
+  </script>
+</body>
+</html>
+
