@@ -145,7 +145,6 @@
       display: none;
       flex-direction: column;
       gap: 16px;
-      height: 100%;
     }
 
     .view-panel.active {
@@ -289,6 +288,172 @@
       background-color: var(--border-color);
       color: var(--text-main);
     }
+
+    /* Settings Gear Button */
+    .settings-btn {
+      background: none;
+      border: none;
+      font-size: 1.1rem;
+      cursor: pointer;
+      color: var(--text-muted);
+      padding: 4px 6px;
+      border-radius: 8px;
+      line-height: 1;
+      transition: color 0.2s ease, background-color 0.2s ease;
+    }
+
+    .settings-btn:hover {
+      color: var(--text-main);
+      background-color: var(--border-color);
+    }
+
+    /* Settings Bottom Sheet */
+    .sheet-overlay {
+      position: fixed;
+      inset: 0;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 200;
+      display: none;
+    }
+
+    .sheet-overlay.active {
+      display: block;
+    }
+
+    .bottom-sheet {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background-color: var(--card-bg);
+      border-top: 1px solid var(--border-color);
+      border-radius: 20px 20px 0 0;
+      padding: 16px 20px 32px;
+      z-index: 300;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+
+    .bottom-sheet.active {
+      transform: translateY(0);
+    }
+
+    .sheet-handle {
+      width: 36px;
+      height: 4px;
+      background-color: var(--border-color);
+      border-radius: 2px;
+      margin: 0 auto 16px;
+    }
+
+    .sheet-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+
+    .settings-field {
+      margin-bottom: 14px;
+    }
+
+    .settings-field label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
+    .settings-field input {
+      width: 100%;
+      background-color: var(--bg-color);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text-main);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .settings-field input:focus {
+      border-color: var(--accent-blue);
+    }
+
+    /* Smart Code Word Card */
+    .cw-hint {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .cw-examples {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0;
+      margin-bottom: 12px;
+    }
+
+    .cw-chip {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .cw-chip:not(:last-child)::after {
+      content: ",\00a0";
+    }
+
+    .cw-status {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+
+    .round-status {
+      display: none;
+      font-size: 0.82rem;
+      color: var(--accent-blue);
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      background-color: var(--bg-color);
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+    }
+
+    .setup-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .mic-btn {
+      background-color: var(--border-color);
+      color: var(--text-muted);
+      border: 1px solid transparent;
+      transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .mic-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .mic-btn.mic-active {
+      background-color: rgba(16, 185, 129, 0.15);
+      color: var(--accent-green);
+      border-color: var(--accent-green);
+    }
+
+    /* Space the code word card away from the panels above it */
+    #codeWordCard {
+      margin-top: 24px;
+    }
   </style>
 </head>
 <body>
@@ -299,9 +464,12 @@
       <h1>AEGIS</h1>
       <span>Covert Detector System</span>
     </div>
-    <button class="sos-btn" id="sosBtn">
-      🚨 <span>SOS</span>
-    </button>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <button class="settings-btn" id="settingsBtn" title="Settings">⚙️</button>
+      <button class="sos-btn" id="sosBtn">
+        🚨 <span>SOS</span>
+      </button>
+    </div>
   </header>
 
   <!-- Dual Switch System -->
@@ -363,6 +531,35 @@
         </div>
       </div>
     </div>
+
+    <!-- Smart Code Word — always visible, independent of active tab -->
+    <div class="card" id="codeWordCard">
+      <div class="card-title">Smart Code Word</div>
+      <p class="cw-hint">Set a natural-sounding phrase to silently trigger SOS.</p>
+
+      <!-- Example phrases shown before a code word is set -->
+      <div class="cw-examples" id="cwExamples">
+        <span class="cw-chip">"Where did I put my blue bag?"</span>
+        <span class="cw-chip">"I need to call mom"</span>
+        <span class="cw-chip">"What time is our flight?"</span>
+        <span class="cw-chip">"I think I left my keys in the car."</span>
+      </div>
+
+      <!-- Status shown once a code word is saved -->
+      <div class="cw-status" id="cwStatus">
+        <span id="cwStatusText" style="font-size:0.85rem; color:var(--accent-green); font-weight:600;">✅ Code Word Set</span>
+        <span id="cwWordDisplay" style="font-size:0.75rem; color:var(--text-muted);"></span>
+      </div>
+
+      <!-- Inline progress during 3-round capture -->
+      <div class="round-status" id="roundStatus"></div>
+      <button class="btn btn-secondary" id="roundRecordBtn" style="display:none; width:100%; margin-bottom:10px;"></button>
+
+      <div class="setup-row">
+        <button class="btn btn-secondary" id="cwSetBtn">Set Code Word</button>
+        <button class="btn mic-btn" id="micBtn" disabled>🎙 Mic OFF</button>
+      </div>
+    </div>
   </main>
 
   <!-- Footer System Log -->
@@ -383,18 +580,48 @@
     </div>
   </div>
 
+  <!-- Settings Bottom Sheet -->
+  <div class="sheet-overlay" id="sheetOverlay"></div>
+  <div class="bottom-sheet" id="settingsSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Emergency Profile</div>
+    <div class="settings-field">
+      <label for="inputName">Your Name</label>
+      <input type="text" id="inputName" placeholder="e.g. Priya Sharma" autocomplete="off">
+    </div>
+    <div class="settings-field">
+      <label for="inputContact">Emergency Contact</label>
+      <input type="tel" id="inputContact" value="+916360863441" readonly
+        style="opacity:0.6; cursor:not-allowed; background:rgba(255,255,255,0.04);">
+      <small style="color:var(--text-muted); font-size:0.72rem;">Pre-configured. Cannot be changed.</small>
+    </div>
+    <button class="btn btn-danger" id="saveSettings" style="width:100%; margin-top:8px;">Save</button>
+  </div>
+
   <script>
-    // Dual Switch Tabs Handler
-    const tabWireless = document.getElementById('tabWireless');
-    const tabWired = document.getElementById('tabWired');
-    const panelWireless = document.getElementById('panelWireless');
-    const panelWired = document.getElementById('panelWired');
+    // ─── Green API Credentials ────────────────────────────────────────────────
+    // Replace these with real values before deployment.
+    const GREEN_API_INSTANCE = 'YOUR_INSTANCE_ID';
+    const GREEN_API_TOKEN    = 'YOUR_API_TOKEN';
+
+    // ─── LocalStorage Keys ────────────────────────────────────────────────────
+    const KEY_NAME     = 'aegis_user_name';
+    const KEY_CONTACT  = 'aegis_emergency_contact';
+    const KEY_CODEWORD = 'aegis_code_word';
+
+    // ─── Utility ──────────────────────────────────────────────────────────────
     const systemLog = document.getElementById('systemLog');
 
     function logMessage(msg) {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       systemLog.textContent = `[${time}] ${msg}`;
     }
+
+    // ─── Tab Switching ────────────────────────────────────────────────────────
+    const tabWireless   = document.getElementById('tabWireless');
+    const tabWired      = document.getElementById('tabWired');
+    const panelWireless = document.getElementById('panelWireless');
+    const panelWired    = document.getElementById('panelWired');
 
     tabWireless.addEventListener('click', () => {
       tabWireless.classList.add('active');
@@ -412,11 +639,116 @@
       logMessage('Switched to Mode B: Wired IR Camera Detector.');
     });
 
-    // SOS Modal Handler
-    const sosBtn = document.getElementById('sosBtn');
-    const sosModal = document.getElementById('sosModal');
+    // ─── Settings / Emergency Profile ─────────────────────────────────────────
+    const settingsBtn   = document.getElementById('settingsBtn');
+    const sheetOverlay  = document.getElementById('sheetOverlay');
+    const settingsSheet = document.getElementById('settingsSheet');
+    const inputName     = document.getElementById('inputName');
+    const inputContact  = document.getElementById('inputContact');
+    const saveSettings  = document.getElementById('saveSettings');
+
+    // Ensure the hardcoded contact is always stored.
+    const FIXED_CONTACT = '+916360863441';
+    localStorage.setItem(KEY_CONTACT, FIXED_CONTACT);
+
+    function openSettings() {
+      inputName.value    = localStorage.getItem(KEY_NAME) || '';
+      inputContact.value = FIXED_CONTACT; // always show fixed number
+      settingsSheet.classList.add('active');
+      sheetOverlay.classList.add('active');
+    }
+
+    function closeSettings() {
+      settingsSheet.classList.remove('active');
+      sheetOverlay.classList.remove('active');
+    }
+
+    settingsBtn.addEventListener('click', openSettings);
+    sheetOverlay.addEventListener('click', closeSettings);
+
+    saveSettings.addEventListener('click', () => {
+      const name = inputName.value.trim();
+      if (!name) {
+        logMessage('⚠️ Please enter your name.');
+        return;
+      }
+      localStorage.setItem(KEY_NAME, name);
+      localStorage.setItem(KEY_CONTACT, FIXED_CONTACT); // always lock the contact
+      closeSettings();
+      logMessage('✅ Emergency profile saved. Requesting location permission...');
+
+      // Request geolocation now so the browser caches the permission grant.
+      // This avoids a first-SOS delay where the user has to respond to the
+      // permission dialog while already in an emergency.
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          () => logMessage('✅ Location permission granted. SOS ready.'),
+          () => logMessage('⚠️ Location permission denied. SOS will send without GPS.'),
+          { timeout: 10000, maximumAge: 60000 }
+        );
+      }
+    });
+
+    // ─── SOS Alert ────────────────────────────────────────────────────────────
+    const sosBtn    = document.getElementById('sosBtn');
+    const sosModal  = document.getElementById('sosModal');
     const sosCancel = document.getElementById('sosCancel');
     const sosConfirm = document.getElementById('sosConfirm');
+
+    // Shared function used by both the manual SOS button and the voice trigger.
+    // lat/lon may be null if geolocation was denied.
+    let lastSosSentAt = 0; // debounce: prevent duplicate silent triggers
+
+    function sendSOSAlert(lat, lon) {
+      const now = Date.now();
+      if (now - lastSosSentAt < 30000) return; // 30-second cooldown
+      lastSosSentAt = now;
+
+      const name    = localStorage.getItem(KEY_NAME)    || 'Unknown User';
+      const contact = localStorage.getItem(KEY_CONTACT) || '';
+
+      if (!contact) {
+        logMessage('⚠️ SOS: No emergency contact set. Tap ⚙️ to add one.');
+        return;
+      }
+
+      const locationStr = (lat !== null && lon !== null)
+        ? `https://maps.google.com/?q=${lat},${lon}`
+        : 'Unavailable';
+
+      const message = `🚨 EMERGENCY: ${name} has triggered an SOS alert. Location: ${locationStr}`;
+
+      // Strip non-digits from contact to build the Green API chatId.
+      const chatId = contact.replace(/\D/g, '') + '@c.us';
+
+      fetch(`https://api.green-api.com/waInstance${GREEN_API_INSTANCE}/sendMessage/${GREEN_API_TOKEN}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, message })
+      })
+        .then(res => res.json())
+        .then(() => logMessage('🚨 SOS alert sent via WhatsApp.'))
+        .catch(() => logMessage('⚠️ SOS: WhatsApp delivery failed. Check connectivity.'));
+    }
+
+    function triggerSOSWithLocation() {
+      logMessage('🚨 SOS Triggered! Fetching GPS coordinates...');
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            logMessage('🚨 GPS acquired. Sending WhatsApp alert...');
+            sendSOSAlert(pos.coords.latitude, pos.coords.longitude);
+          },
+          () => {
+            logMessage('🚨 GPS denied. Sending alert without location...');
+            sendSOSAlert(null, null);
+          },
+          { timeout: 5000 }
+        );
+      } else {
+        sendSOSAlert(null, null);
+      }
+    }
 
     sosBtn.addEventListener('click', () => {
       sosModal.classList.add('active');
@@ -428,23 +760,239 @@
 
     sosConfirm.addEventListener('click', () => {
       sosModal.classList.remove('active');
-      logMessage('🚨 SOS Triggered! Fetching GPS coordinates...');
-      if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const lat = pos.coords.latitude;
-            const lon = pos.coords.longitude;
-            logMessage(`🚨 GPS Acquired: ${lat.toFixed(4)}, ${lon.toFixed(4)}. Alert dispatched!`);
-            alert(`🚨 SOS ALERT DISPATCHED!\nLocation: https://maps.google.com/?q=${lat},${lon}`);
-          },
-          (err) => {
-            logMessage('🚨 GPS Failed/Denied. Sending fallback alert without location...');
-            alert('🚨 SOS ALERT DISPATCHED!\nLocation: Unavailable');
-          },
-          { timeout: 5000 }
-        );
+      lastSosSentAt = 0; // manual press always goes through
+      triggerSOSWithLocation();
+    });
+
+    // ─── Smart Code Word ──────────────────────────────────────────────────────
+    const cwSetBtn       = document.getElementById('cwSetBtn');
+    const micBtn         = document.getElementById('micBtn');
+    const cwExamples     = document.getElementById('cwExamples');
+    const cwStatus       = document.getElementById('cwStatus');
+    const cwStatusText   = document.getElementById('cwStatusText');
+    const cwWordDisplay  = document.getElementById('cwWordDisplay');
+    const roundStatus    = document.getElementById('roundStatus');
+    const roundRecordBtn = document.getElementById('roundRecordBtn');
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    let isCapturing     = false;
+    let captureRound    = 0;
+    let capturedPhrases = [];
+
+    function refreshCodeWordUI() {
+      const stored = localStorage.getItem(KEY_CODEWORD);
+      if (stored) {
+        cwExamples.style.display    = 'none';
+        cwStatus.style.display      = 'flex';
+        cwStatusText.textContent    = '✅ Code Word Set';
+        cwWordDisplay.textContent   = `"${stored}"`;
+        cwSetBtn.textContent        = 'Change Code Word';
+        micBtn.disabled             = false;
       } else {
-        alert('🚨 SOS ALERT DISPATCHED!\nLocation: Not Supported');
+        cwExamples.style.display    = 'flex';
+        cwStatus.style.display      = 'none';
+        cwSetBtn.textContent        = 'Set Code Word';
+        micBtn.disabled             = true;
+      }
+    }
+
+    // Pick most frequently seen phrase; fall back to longest if all differ.
+    function getBestPhrase(phrases) {
+      const freq = {};
+      phrases.forEach(p => { freq[p] = (freq[p] || 0) + 1; });
+      return Object.entries(freq).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0][0];
+    }
+
+    // Each call sets up the button for the next round (or the confirm step).
+    // The user manually taps the button to trigger recording — no auto-advance.
+    function startCaptureRound() {
+      if (!SpeechRecognition) {
+        logMessage('⚠️ Voice features require Chrome or Edge. Firefox does not support Web Speech API.');
+        cwSetBtn.disabled = false;
+        isCapturing = false;
+        return;
+      }
+
+      if (captureRound >= 3) {
+        // All 3 rounds done — show best match and let user confirm.
+        const best = getBestPhrase(capturedPhrases);
+        roundStatus.style.display = 'block';
+        roundStatus.textContent   = `Best match: "${best}"`;
+        roundRecordBtn.textContent = '✅ Use this phrase';
+        roundRecordBtn.style.display = 'block';
+        roundRecordBtn.disabled = false;
+        roundRecordBtn.onclick = () => {
+          localStorage.setItem(KEY_CODEWORD, best);
+          isCapturing = false; captureRound = 0; capturedPhrases = [];
+          roundStatus.style.display    = 'none';
+          roundRecordBtn.style.display = 'none';
+          roundRecordBtn.onclick       = null;
+          cwSetBtn.disabled = false;
+          refreshCodeWordUI();
+          logMessage('✅ Code word saved.');
+        };
+        return;
+      }
+
+      captureRound++;
+      roundRecordBtn.textContent   = `🎙 Record Round ${captureRound} of 3`;
+      roundRecordBtn.style.display = 'block';
+      roundRecordBtn.disabled      = false;
+
+      roundRecordBtn.onclick = () => {
+        roundRecordBtn.disabled    = true;
+        roundRecordBtn.textContent = '⏺ Listening...';
+        roundStatus.style.display  = 'block';
+        roundStatus.textContent    = `Round ${captureRound} of 3 — say your phrase now...`;
+
+        const rec = new SpeechRecognition();
+        rec.lang            = 'en-US';
+        rec.interimResults  = false;
+        rec.maxAlternatives = 1;
+
+        rec.onresult = (e) => {
+          const phrase = e.results[0][0].transcript.trim();
+          capturedPhrases.push(phrase);
+          roundStatus.textContent      = `✓ Round ${captureRound} of 3: "${phrase}"`;
+          roundRecordBtn.style.display = 'none';
+          startCaptureRound(); // set up the next round button
+        };
+
+        rec.onerror = () => {
+          roundStatus.textContent = `⚠️ Could not hear — tap to try again.`;
+          captureRound--; // retry the same round
+          startCaptureRound();
+        };
+
+        rec.start();
+      };
+    }
+
+    cwSetBtn.addEventListener('click', () => {
+      if (isCapturing) return;
+      // Stop continuous mic if running before capturing a new code word.
+      if (isMicOn) stopContinuousListening();
+      isCapturing = true; captureRound = 0; capturedPhrases = [];
+      cwSetBtn.disabled            = true;
+      roundStatus.style.display    = 'none';
+      roundRecordBtn.style.display = 'none';
+      roundRecordBtn.onclick       = null;
+      startCaptureRound();
+    });
+
+    // ─── Continuous Voice Trigger ─────────────────────────────────────────────
+    let isMicOn       = false;
+    let continuousRec = null;
+
+    // On file:// protocol, Chrome re-prompts for mic on every .start() call and
+    // blocks geolocation. Auto-restart is disabled in that case to stop the spam.
+    const IS_FILE_PROTOCOL = location.protocol === 'file:';
+
+    function startContinuousListening() {
+      if (!SpeechRecognition) {
+        logMessage('⚠️ Voice features require Chrome or Edge. Firefox does not support Web Speech API.');
+        isMicOn = false;
+        micBtn.textContent = '🎙 Mic OFF';
+        micBtn.classList.remove('mic-active');
+        return;
+      }
+
+      continuousRec                = new SpeechRecognition();
+      continuousRec.lang           = 'en-US';
+      continuousRec.continuous     = true;
+      continuousRec.interimResults = true;
+
+      continuousRec.onresult = (e) => {
+        const codeWord = localStorage.getItem(KEY_CODEWORD);
+        if (!codeWord) return;
+        const codeWordLower = codeWord.toLowerCase();
+
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const transcript = e.results[i][0].transcript.toLowerCase();
+          if (transcript.includes(codeWordLower)) {
+            logMessage('🔑 Code word detected — silent SOS triggered.');
+            // Silently send — no visible alarm.
+            if ('geolocation' in navigator) {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => sendSOSAlert(pos.coords.latitude, pos.coords.longitude),
+                ()    => sendSOSAlert(null, null),
+                { timeout: 5000 }
+              );
+            } else {
+              sendSOSAlert(null, null);
+            }
+            break;
+          }
+        }
+      };
+
+      continuousRec.onerror = (e) => {
+        if (e.error === 'not-allowed') {
+          logMessage('MIC: Permission denied. Enable microphone access and try again.');
+          isMicOn = false;
+          micBtn.textContent = '🎙 Mic OFF';
+          micBtn.classList.remove('mic-active');
+        }
+      };
+
+      // On file:// protocol, auto-restarting causes Chrome to re-prompt for mic
+      // permission on every silence gap. Skip auto-restart; mic pauses on silence.
+      if (!IS_FILE_PROTOCOL) {
+        continuousRec.onend = () => {
+          if (isMicOn) continuousRec.start();
+        };
+      } else {
+        continuousRec.onend = () => {
+          if (isMicOn) {
+            isMicOn = false;
+            micBtn.textContent = '🎙 Mic OFF';
+            micBtn.classList.remove('mic-active');
+            logMessage('MIC: Paused after silence. Serve over HTTP for continuous listening.');
+          }
+        };
+      }
+
+      continuousRec.start();
+      logMessage('MIC: Listening for code word...');
+    }
+
+    function stopContinuousListening() {
+      if (continuousRec) {
+        continuousRec.onend = null; // prevent auto-restart
+        continuousRec.stop();
+        continuousRec = null;
+      }
+      logMessage('MIC: Stopped.');
+    }
+
+    micBtn.addEventListener('click', () => {
+      if (isMicOn) {
+        isMicOn = false;
+        micBtn.textContent = '🎙 Mic OFF';
+        micBtn.classList.remove('mic-active');
+        stopContinuousListening();
+      } else {
+        isMicOn = true;
+        micBtn.textContent = '🎙 Mic ON';
+        micBtn.classList.add('mic-active');
+        startContinuousListening();
+      }
+    });
+
+    // ─── Init ─────────────────────────────────────────────────────────────────
+    window.addEventListener('load', () => {
+      // Open settings sheet on first run if profile is incomplete.
+      if (!localStorage.getItem(KEY_NAME) || !localStorage.getItem(KEY_CONTACT)) {
+        openSettings();
+      }
+      refreshCodeWordUI();
+      // Warn early if running from file:// — mic auto-restart and geolocation
+      // are blocked by Chrome on this protocol. Serve via HTTP for full features.
+      if (IS_FILE_PROTOCOL) {
+        logMessage('⚠️ file:// detected — serve over HTTP for mic & location to work fully.');
+      } else {
+        logMessage('SYS: App initialized. Mode: Wireless Radar.');
       }
     });
   </script>
