@@ -188,7 +188,7 @@
     }
 
     .canvas-placeholder.camera-active {
-      aspect-ratio: 16 / 9;
+      aspect-ratio: 4 / 3;
       max-width: 640px;
       max-height: none;
       position: relative;
@@ -476,34 +476,295 @@
       margin-top: 24px;
     }
 
+    /* ─── WIRELESS RADAR UI ──────────────────────────────────────────────────── */
+
+    /* Connect Bar */
+    .esp-connect-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .esp-ip-input {
+      flex: 1;
+      min-width: 130px;
+      background-color: #fff7fa;
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 9px 12px;
+      color: var(--text-main);
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .esp-ip-input:focus {
+      border-color: var(--accent-blue);
+    }
+
+    .btn-connect {
+      background-color: var(--accent-blue);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 9px 18px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 0.2s ease, transform 0.1s ease;
+    }
+
+    .btn-connect:hover { background-color: #b52459; }
+    .btn-connect:active { transform: scale(0.96); }
+
+    .btn-connect.connected {
+      background-color: var(--accent-green);
+    }
+
+    .btn-connect.connected:hover { background-color: #076e52; }
+
+    .esp-connected-ip {
+      font-size: 0.75rem;
+      color: var(--accent-green);
+      font-weight: 600;
+      display: none;
+      align-items: center;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
+    .esp-connected-ip.visible { display: flex; }
+
+    /* Radar Canvas */
+    .radar-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 280px;
+      margin: 0 auto;
+    }
+
+    #radarCanvas {
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: block;
+    }
+
+    /* Signal List */
+    .signal-section-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .signal-count-badge {
+      background-color: rgba(214, 51, 108, 0.12);
+      color: var(--accent-blue);
+      border-radius: 20px;
+      padding: 1px 8px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .signal-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
+    .signal-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background-color: #fff7fa;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 9px 12px;
+      transition: border-color 0.2s ease;
+    }
+
+    .signal-item:hover { border-color: var(--accent-blue); }
+
+    .signal-icon {
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+
+    .signal-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .signal-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-main);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .signal-meta {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    /* RSSI bar */
+    .rssi-bar-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 3px;
+      flex-shrink: 0;
+    }
+
+    .rssi-value {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+
+    .rssi-bar-bg {
+      width: 56px;
+      height: 6px;
+      background-color: #f2c9d8;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .rssi-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    /* Track button */
+    .btn-track {
+      background-color: #fff0f5;
+      color: var(--accent-blue);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .btn-track:hover {
+      background-color: var(--accent-blue);
+      color: #fff;
+    }
+
+    .btn-track.tracking {
+      background-color: var(--accent-blue);
+      color: #fff;
+    }
+
+    /* Refresh indicator */
+    .refresh-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .refresh-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: #ccc;
+      transition: background-color 0.3s ease;
+    }
+
+    .refresh-dot.pulsing {
+      background-color: var(--accent-green);
+      animation: pulse-green 0.6s ease;
+    }
+
+    @keyframes pulse-green {
+      0%   { box-shadow: 0 0 0 0 rgba(9, 137, 104, 0.5); }
+      70%  { box-shadow: 0 0 0 6px rgba(9, 137, 104, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(9, 137, 104, 0); }
+    }
+
+    /* Tabs within wireless panel */
+    .signal-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .signal-tab {
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      background: #fff7fa;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s ease;
+    }
+
+    .signal-tab.active {
+      background-color: var(--accent-blue);
+      color: #fff;
+      border-color: var(--accent-blue);
+    }
+
+    .signal-tab-pane { display: none; }
+    .signal-tab-pane.active { display: block; }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 20px 10px;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+    }
+
+    .empty-state span { display: block; font-size: 1.5rem; margin-bottom: 6px; }
+
+    /* Directional guidance */
+    .guidance-text {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+      text-align: center;
+      padding: 10px 0 4px;
+    }
+
+    .guidance-sub {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
     @media (max-width: 480px) {
-      header {
-        padding: 12px 14px;
-      }
-
-      .brand h1 {
-        font-size: 1rem;
-      }
-
-      .mode-switch-container {
-        padding: 10px 12px;
-      }
-
-      .mode-tab {
-        font-size: 0.78rem;
-      }
-
-      .card {
-        padding: 12px;
-      }
-
-      .canvas-placeholder.camera-active {
-        max-width: 100%;
-      }
-
-      footer {
-        padding: 9px 12px calc(9px + env(safe-area-inset-bottom));
-      }
+      header { padding: 12px 14px; }
+      .brand h1 { font-size: 1rem; }
+      .mode-switch-container { padding: 10px 12px; }
+      .mode-tab { font-size: 0.78rem; }
+      .card { padding: 12px; }
+      .canvas-placeholder.camera-active { max-width: 100%; aspect-ratio: 3 / 4; }
+      footer { padding: 9px 12px calc(9px + env(safe-area-inset-bottom)); }
     }
   </style>
 </head>
@@ -539,25 +800,83 @@
   <main>
     <!-- View 1: Wireless Camera Radar Mode -->
     <div class="view-panel active" id="panelWireless">
+
+      <!-- ── Connect to ESP32 ── -->
       <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <span class="card-title" style="margin-bottom: 0;">RF Sector Radar</span>
-          <span class="status-badge"><span class="status-dot"></span> Radar Ready</span>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span class="card-title" style="margin-bottom:0;">ESP32 Connection</span>
+          <div class="refresh-indicator">
+            <div class="refresh-dot" id="refreshDot"></div>
+            <span id="refreshLabel">Not connected</span>
+          </div>
         </div>
-        <div class="canvas-placeholder" id="radarCanvasContainer">
-          <span style="font-size: 2rem;">📡</span>
-          <span>8-Sector Directional Radar</span>
-          <span style="font-size: 0.75rem; color: var(--text-muted);">(Wi-Fi / BLE Signal Gradient)</span>
+        <div class="esp-connect-bar">
+          <input class="esp-ip-input" type="text" id="espIpInput" value="shesafe.local" placeholder="e.g. shesafe.local" autocomplete="off" spellcheck="false">
+          <button class="btn-connect" id="btnConnect">Connect</button>
+        </div>
+        <div class="esp-connected-ip" id="connectedIpDisplay">
+          <span>✅</span><span id="connectedIpText"></span>
         </div>
       </div>
 
+      <!-- ── Radar Canvas ── -->
       <div class="card">
-        <div class="card-title">Directional Guidance</div>
-        <div style="font-size: 1.1rem; font-weight: 700; color: var(--accent-blue); text-align: center; padding: 10px 0;">
-          STATUS: IDLE / WAITING FOR SCAN
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span class="card-title" style="margin-bottom:0;">RF Sector Radar</span>
+          <span class="status-badge" id="radarStatusBadge">
+            <span class="status-dot" style="background-color:var(--accent-blue);"></span>
+            <span id="radarStatusText">Idle</span>
+          </span>
+        </div>
+        <div class="radar-wrap">
+          <canvas id="radarCanvas" width="280" height="280"></canvas>
         </div>
       </div>
-    </div>
+
+      <!-- ── Signal List ── -->
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <span class="card-title" style="margin-bottom:0;">Detected Signals</span>
+          <span id="totalSignalCount" style="font-size:0.75rem;color:var(--text-muted);">0 signals</span>
+        </div>
+
+        <!-- Wi-Fi / BLE sub-tabs -->
+        <div class="signal-tabs">
+          <button class="signal-tab active" id="stWifi">📶 Wi-Fi</button>
+          <button class="signal-tab" id="stBle">🔵 Bluetooth</button>
+        </div>
+
+        <!-- Wi-Fi pane -->
+        <div class="signal-tab-pane active" id="paneWifi">
+          <div class="signal-section-label">
+            Wi-Fi Networks
+            <span class="signal-count-badge" id="wifiCount">0</span>
+          </div>
+          <div class="signal-list" id="wifiList">
+            <div class="empty-state"><span>📡</span>Connect to ESP32 to scan</div>
+          </div>
+        </div>
+
+        <!-- BLE pane -->
+        <div class="signal-tab-pane" id="paneBle">
+          <div class="signal-section-label">
+            Bluetooth Devices
+            <span class="signal-count-badge" id="bleCount">0</span>
+          </div>
+          <div class="signal-list" id="bleList">
+            <div class="empty-state"><span>🔵</span>Connect to ESP32 to scan</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Directional Guidance ── -->
+      <div class="card">
+        <div class="card-title">Directional Guidance</div>
+        <div class="guidance-text" id="guidanceText">STATUS: IDLE / WAITING FOR SCAN</div>
+        <div class="guidance-sub" id="guidanceSub"></div>
+      </div>
+
+    </div><!-- /panelWireless -->
 
     <!-- View 2: Wired Camera Detector Mode (CV) -->
     <div class="view-panel" id="panelWired">
@@ -574,7 +893,7 @@
             autoplay
             muted
             playsinline
-            style="display: none; width: 100%; height: 100%; object-fit: contain; background-color: #000000; border-radius: 12px;"
+            style="display: none; width: 100%; height: 100%; object-fit: cover; background-color: #000000; border-radius: 12px;"
           ></video>
           <canvas id="processingCanvas" width="320" height="240" hidden></canvas>
           <canvas id="detectionOverlay" width="320" height="240"></canvas>
@@ -595,7 +914,7 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Detection Threshold & Threat Score</div>
+        <div class="card-title">Detection Threshold &amp; Threat Score</div>
         <div style="font-size: 0.85rem; color: var(--text-muted);">
           Blink Analysis Score: <strong id="blinkScore" style="color: var(--text-main);">0%</strong>
           <span id="blinkStatus">(No optical target detected)</span>
@@ -662,7 +981,7 @@
     </div>
     <div class="settings-field">
       <label for="inputContact">Emergency Contact</label>
-      <input type="tel" id="inputContact" value="+916360863441" readonly
+      <input type="tel" id="inputContact" value="+917406531222" readonly
         style="opacity:0.6; cursor:not-allowed; background:#fff7fa;">
       <small style="color:var(--text-muted); font-size:0.72rem;">Pre-configured. Cannot be changed.</small>
     </div>
@@ -672,8 +991,8 @@
   <script>
     // ─── Green API Credentials ────────────────────────────────────────────────
     // Replace these with real values before deployment.
-    const GREEN_API_INSTANCE = 'YOUR_INSTANCE_ID';
-    const GREEN_API_TOKEN    = 'YOUR_API_TOKEN';
+    const GREEN_API_INSTANCE = '710722748361';
+    const GREEN_API_TOKEN    = '303c9adf18e54cb3bce3236cec65758a6c457dacf91246a89e';
 
     // ─── LocalStorage Keys ────────────────────────────────────────────────────
     const KEY_NAME     = 'aegis_user_name';
@@ -983,7 +1302,7 @@
     const saveSettings  = document.getElementById('saveSettings');
 
     // Ensure the hardcoded contact is always stored.
-    const FIXED_CONTACT = '+916360863441';
+    const FIXED_CONTACT = '+917406531222';
     localStorage.setItem(KEY_CONTACT, FIXED_CONTACT);
 
     function openSettings() {
@@ -1315,6 +1634,438 @@
       }
     });
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ─── WIRELESS RADAR MODULE ────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    const btnConnect        = document.getElementById('btnConnect');
+    const espIpInput        = document.getElementById('espIpInput');
+    const connectedIpDisplay = document.getElementById('connectedIpDisplay');
+    const connectedIpText   = document.getElementById('connectedIpText');
+    const refreshDot        = document.getElementById('refreshDot');
+    const refreshLabel      = document.getElementById('refreshLabel');
+    const radarStatusBadge  = document.getElementById('radarStatusBadge');
+    const radarStatusText   = document.getElementById('radarStatusText');
+    const guidanceText      = document.getElementById('guidanceText');
+    const guidanceSub       = document.getElementById('guidanceSub');
+    const wifiList          = document.getElementById('wifiList');
+    const bleList           = document.getElementById('bleList');
+    const wifiCount         = document.getElementById('wifiCount');
+    const bleCount          = document.getElementById('bleCount');
+    const totalSignalCount  = document.getElementById('totalSignalCount');
+    const radarCanvas       = document.getElementById('radarCanvas');
+    const rctx              = radarCanvas.getContext('2d');
+
+    // Signal sub-tabs
+    document.getElementById('stWifi').addEventListener('click', () => {
+      document.getElementById('stWifi').classList.add('active');
+      document.getElementById('stBle').classList.remove('active');
+      document.getElementById('paneWifi').classList.add('active');
+      document.getElementById('paneBle').classList.remove('active');
+    });
+    document.getElementById('stBle').addEventListener('click', () => {
+      document.getElementById('stBle').classList.add('active');
+      document.getElementById('stWifi').classList.remove('active');
+      document.getElementById('paneBle').classList.add('active');
+      document.getElementById('paneWifi').classList.remove('active');
+    });
+
+    // ── State ──────────────────────────────────────────────────────────────────
+    let espBaseUrl    = '';
+    let isConnected   = false;
+    let scanInterval  = null;
+    let trackedSignals = new Set();           // names of signals being tracked
+    let lastWifiData  = [];
+    let lastBleData   = [];
+    let radarAngle    = 0;                    // sweep angle in radians
+    let radarAnimId   = null;
+
+    // ── RSSI helpers ──────────────────────────────────────────────────────────
+    // RSSI range: -30 (excellent) to -100 (very weak)
+    function rssiToPercent(rssi) {
+      return Math.max(0, Math.min(100, ((rssi + 100) / 70) * 100));
+    }
+
+    function rssiColor(rssi) {
+      if (rssi >= -55) return '#098968';   // strong  → green
+      if (rssi >= -70) return '#f59e0b';   // medium  → amber
+      return '#e11d48';                    // weak    → red
+    }
+
+    function rssiLabel(rssi) {
+      if (rssi >= -55) return 'Strong';
+      if (rssi >= -70) return 'Medium';
+      return 'Weak';
+    }
+
+    // ── Radar Canvas Drawing ──────────────────────────────────────────────────
+    function drawRadar(wifiSignals, bleSignals) {
+      const W = radarCanvas.width;
+      const H = radarCanvas.height;
+      const cx = W / 2;
+      const cy = H / 2;
+      const maxR = Math.min(cx, cy) - 8;
+
+      rctx.clearRect(0, 0, W, H);
+
+      // Background circle
+      rctx.beginPath();
+      rctx.arc(cx, cy, maxR, 0, Math.PI * 2);
+      rctx.fillStyle = '#fff0f5';
+      rctx.fill();
+
+      // Concentric rings
+      const rings = 4;
+      for (let i = 1; i <= rings; i++) {
+        const r = (maxR / rings) * i;
+        rctx.beginPath();
+        rctx.arc(cx, cy, r, 0, Math.PI * 2);
+        rctx.strokeStyle = 'rgba(242,201,216,0.7)';
+        rctx.lineWidth = 1;
+        rctx.stroke();
+      }
+
+      // Cross-hair lines
+      rctx.strokeStyle = 'rgba(242,201,216,0.5)';
+      rctx.lineWidth = 1;
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+        rctx.beginPath();
+        rctx.moveTo(cx, cy);
+        rctx.lineTo(cx + maxR * Math.cos(a), cy + maxR * Math.sin(a));
+        rctx.stroke();
+      }
+
+      // Sweep trail (green wedge behind the sweep line)
+      const trailLen = Math.PI / 4;
+      const grad = rctx.createConicalGradient
+        ? null // not all browsers support conical gradient
+        : null;
+
+      // Draw sweep glow with arc fill
+      rctx.save();
+      rctx.beginPath();
+      rctx.moveTo(cx, cy);
+      rctx.arc(cx, cy, maxR - 4, radarAngle - trailLen, radarAngle, false);
+      rctx.closePath();
+      const sweepGrad = rctx.createLinearGradient(cx, cy, cx + maxR, cy);
+      sweepGrad.addColorStop(0, 'rgba(9,137,104,0)');
+      sweepGrad.addColorStop(1, 'rgba(9,137,104,0.25)');
+      rctx.fillStyle = sweepGrad;
+      rctx.fill();
+      rctx.restore();
+
+      // Sweep line
+      rctx.save();
+      rctx.strokeStyle = '#098968';
+      rctx.lineWidth = 2;
+      rctx.shadowColor = '#098968';
+      rctx.shadowBlur = 8;
+      rctx.beginPath();
+      rctx.moveTo(cx, cy);
+      rctx.lineTo(cx + maxR * Math.cos(radarAngle), cy + maxR * Math.sin(radarAngle));
+      rctx.stroke();
+      rctx.restore();
+
+      // Plot Wi-Fi dots (evenly spaced by index around the circle, radius = RSSI-mapped)
+      const allSignals = [
+        ...wifiSignals.map(s => ({ ...s, type: 'wifi' })),
+        ...bleSignals.map(s => ({ ...s, type: 'ble' }))
+      ];
+
+      allSignals.forEach((sig, idx) => {
+        const angle = (idx / Math.max(allSignals.length, 1)) * Math.PI * 2;
+        const dist  = (rssiToPercent(sig.rssi) / 100) * (maxR - 16) + 10;
+        const sx    = cx + dist * Math.cos(angle);
+        const sy    = cy + dist * Math.sin(angle);
+        const color = rssiColor(sig.rssi);
+        const isTracked = trackedSignals.has(sig.ssid || sig.name);
+
+        // Glow for tracked
+        if (isTracked) {
+          rctx.save();
+          rctx.shadowColor = color;
+          rctx.shadowBlur = 16;
+          rctx.beginPath();
+          rctx.arc(sx, sy, 8, 0, Math.PI * 2);
+          rctx.fillStyle = color;
+          rctx.fill();
+          rctx.restore();
+        }
+
+        // Dot
+        rctx.beginPath();
+        rctx.arc(sx, sy, isTracked ? 6 : 4, 0, Math.PI * 2);
+        rctx.fillStyle = color;
+        rctx.fill();
+
+        // Wi-Fi vs BLE indicator ring
+        rctx.beginPath();
+        rctx.arc(sx, sy, isTracked ? 9 : 6, 0, Math.PI * 2);
+        rctx.strokeStyle = sig.type === 'wifi' ? 'rgba(214,51,108,0.5)' : 'rgba(59,130,246,0.5)';
+        rctx.lineWidth = 1.5;
+        rctx.stroke();
+      });
+
+      // Center user dot
+      rctx.save();
+      rctx.shadowColor = '#d6336c';
+      rctx.shadowBlur = 14;
+      rctx.beginPath();
+      rctx.arc(cx, cy, 8, 0, Math.PI * 2);
+      rctx.fillStyle = '#d6336c';
+      rctx.fill();
+      rctx.restore();
+
+      // Center label
+      rctx.fillStyle = '#fff';
+      rctx.font = 'bold 8px sans-serif';
+      rctx.textAlign = 'center';
+      rctx.textBaseline = 'middle';
+      rctx.fillText('YOU', cx, cy);
+
+      // RSSI scale labels
+      rctx.fillStyle = 'rgba(128,86,106,0.6)';
+      rctx.font = '9px sans-serif';
+      rctx.textAlign = 'left';
+      rctx.textBaseline = 'middle';
+      const labels = ['-100', '-78', '-55', '-30'];
+      labels.forEach((lbl, i) => {
+        const r = (maxR / rings) * (i + 1);
+        rctx.fillText(lbl, cx + 4, cy - r);
+      });
+
+      // Status: not connected
+      if (!isConnected) {
+        rctx.fillStyle = 'rgba(128,86,106,0.55)';
+        rctx.font = 'bold 13px sans-serif';
+        rctx.textAlign = 'center';
+        rctx.textBaseline = 'middle';
+        rctx.fillText('Connect to ESP32', cx, cy + maxR * 0.55);
+      }
+    }
+
+    function animateRadar() {
+      radarAngle = (radarAngle + 0.03) % (Math.PI * 2);
+      drawRadar(lastWifiData, lastBleData);
+      radarAnimId = requestAnimationFrame(animateRadar);
+    }
+
+    // ── Signal list rendering ─────────────────────────────────────────────────
+    function makeTrackBtn(name) {
+      const btn = document.createElement('button');
+      btn.className = 'btn-track' + (trackedSignals.has(name) ? ' tracking' : '');
+      btn.textContent = trackedSignals.has(name) ? '📍 Tracking' : 'Track';
+      btn.addEventListener('click', () => {
+        if (trackedSignals.has(name)) {
+          trackedSignals.delete(name);
+          btn.textContent = 'Track';
+          btn.classList.remove('tracking');
+          logMessage(`Stopped tracking: ${name}`);
+        } else {
+          trackedSignals.add(name);
+          btn.textContent = '📍 Tracking';
+          btn.classList.add('tracking');
+          logMessage(`Now tracking: ${name}`);
+        }
+      });
+      return btn;
+    }
+
+    function renderWifiList(signals) {
+      wifiList.innerHTML = '';
+      if (!signals.length) {
+        wifiList.innerHTML = '<div class="empty-state"><span>📡</span>No Wi-Fi networks found</div>';
+        return;
+      }
+      // Sort by RSSI descending (strongest first)
+      signals.slice().sort((a, b) => b.rssi - a.rssi).forEach(sig => {
+        const pct   = rssiToPercent(sig.rssi);
+        const color = rssiColor(sig.rssi);
+        const item  = document.createElement('div');
+        item.className = 'signal-item';
+        item.innerHTML = `
+          <span class="signal-icon">📶</span>
+          <div class="signal-info">
+            <div class="signal-name" title="${sig.ssid}">${sig.ssid || '(Hidden)'}</div>
+            <div class="signal-meta">Ch ${sig.channel} · ${sig.freq} MHz · ${sig.bssid} · ${rssiLabel(sig.rssi)}</div>
+          </div>
+          <div class="rssi-bar-wrap">
+            <span class="rssi-value">${sig.rssi} dBm</span>
+            <div class="rssi-bar-bg">
+              <div class="rssi-bar-fill" style="width:${pct}%;background:${color};"></div>
+            </div>
+          </div>
+        `;
+        item.appendChild(makeTrackBtn(sig.ssid || sig.bssid));
+        wifiList.appendChild(item);
+      });
+    }
+
+    function renderBleList(signals) {
+      bleList.innerHTML = '';
+      if (!signals.length) {
+        bleList.innerHTML = '<div class="empty-state"><span>🔵</span>No Bluetooth devices found</div>';
+        return;
+      }
+      signals.slice().sort((a, b) => b.rssi - a.rssi).forEach(sig => {
+        const pct   = rssiToPercent(sig.rssi);
+        const color = rssiColor(sig.rssi);
+        const item  = document.createElement('div');
+        item.className = 'signal-item';
+        item.innerHTML = `
+          <span class="signal-icon">🔵</span>
+          <div class="signal-info">
+            <div class="signal-name" title="${sig.name}">${sig.name}</div>
+            <div class="signal-meta">BLE · ${rssiLabel(sig.rssi)}</div>
+          </div>
+          <div class="rssi-bar-wrap">
+            <span class="rssi-value">${sig.rssi} dBm</span>
+            <div class="rssi-bar-bg">
+              <div class="rssi-bar-fill" style="width:${pct}%;background:${color};"></div>
+            </div>
+          </div>
+        `;
+        item.appendChild(makeTrackBtn(sig.name));
+        bleList.appendChild(item);
+      });
+    }
+
+    // ── Guidance logic ────────────────────────────────────────────────────────
+    function updateGuidance(wifi, ble) {
+      const all = [...wifi, ...ble];
+      if (!all.length) {
+        guidanceText.textContent = 'STATUS: NO SIGNALS DETECTED';
+        guidanceSub.textContent  = 'Move around the room for a better scan.';
+        return;
+      }
+      const strongest = all.reduce((best, s) => s.rssi > best.rssi ? s : best, all[0]);
+      const name = strongest.ssid || strongest.name || 'Unknown';
+      const label = rssiLabel(strongest.rssi);
+      if (strongest.rssi >= -55) {
+        guidanceText.textContent = `⚠️ STRONG SIGNAL: ${name}`;
+        guidanceSub.textContent  = `${strongest.rssi} dBm — Possible nearby device. Investigate area.`;
+      } else if (strongest.rssi >= -70) {
+        guidanceText.textContent = `📡 MEDIUM SIGNAL: ${name}`;
+        guidanceSub.textContent  = `${strongest.rssi} dBm — ${label} signal. Check surroundings.`;
+      } else {
+        guidanceText.textContent = `✅ ALL SIGNALS WEAK`;
+        guidanceSub.textContent  = `Strongest: ${name} at ${strongest.rssi} dBm. Area appears clear.`;
+      }
+    }
+
+    // ── Pulse refresh dot ─────────────────────────────────────────────────────
+    function pulseRefresh(ok) {
+      refreshDot.classList.remove('pulsing');
+      void refreshDot.offsetWidth; // reflow
+      if (ok) {
+        refreshDot.style.backgroundColor = '';
+        refreshDot.classList.add('pulsing');
+        setTimeout(() => refreshDot.classList.remove('pulsing'), 700);
+      } else {
+        refreshDot.style.backgroundColor = '#e11d48';
+      }
+    }
+
+    // ── Fetch from ESP32 ──────────────────────────────────────────────────────
+    async function fetchSignals() {
+      if (!isConnected || !espBaseUrl) return;
+      try {
+        const [wRes, bRes] = await Promise.all([
+          fetch(`${espBaseUrl}/wifi`, { signal: AbortSignal.timeout(4000) }),
+          fetch(`${espBaseUrl}/ble`,  { signal: AbortSignal.timeout(4000) })
+        ]);
+        const wifi = await wRes.json();
+        const ble  = await bRes.json();
+
+        lastWifiData = wifi;
+        lastBleData  = ble;
+
+        wifiCount.textContent = wifi.length;
+        bleCount.textContent  = ble.length;
+        totalSignalCount.textContent = `${wifi.length + ble.length} signals`;
+
+        renderWifiList(wifi);
+        renderBleList(ble);
+        updateGuidance(wifi, ble);
+
+        const total = wifi.length + ble.length;
+        refreshLabel.textContent = `Updated · ${wifi.length}W ${ble.length}BT`;
+        radarStatusText.textContent = `${total} signal${total !== 1 ? 's' : ''}`;
+        radarStatusBadge.querySelector('.status-dot').style.backgroundColor = 'var(--accent-green)';
+        pulseRefresh(true);
+        logMessage(`📡 Scan: ${wifi.length} Wi-Fi, ${ble.length} BLE devices found.`);
+      } catch (err) {
+        pulseRefresh(false);
+        refreshLabel.textContent = 'Scan failed';
+        logMessage('⚠️ ESP32 scan failed. Check connection.');
+      }
+    }
+
+    // ── Connect / Disconnect ──────────────────────────────────────────────────
+    btnConnect.addEventListener('click', async () => {
+      if (isConnected) {
+        // Disconnect
+        isConnected = false;
+        espBaseUrl  = '';
+        clearInterval(scanInterval);
+        scanInterval = null;
+        btnConnect.textContent = 'Connect';
+        btnConnect.classList.remove('connected');
+        connectedIpDisplay.classList.remove('visible');
+        refreshLabel.textContent = 'Not connected';
+        refreshDot.style.backgroundColor = '#ccc';
+        radarStatusText.textContent = 'Idle';
+        radarStatusBadge.querySelector('.status-dot').style.backgroundColor = 'var(--accent-blue)';
+        lastWifiData = []; lastBleData = [];
+        wifiList.innerHTML = '<div class="empty-state"><span>📡</span>Connect to ESP32 to scan</div>';
+        bleList.innerHTML  = '<div class="empty-state"><span>🔵</span>Connect to ESP32 to scan</div>';
+        wifiCount.textContent = '0';
+        bleCount.textContent  = '0';
+        totalSignalCount.textContent = '0 signals';
+        guidanceText.textContent = 'STATUS: IDLE / WAITING FOR SCAN';
+        guidanceSub.textContent  = '';
+        logMessage('Disconnected from ESP32.');
+        return;
+      }
+
+      // Connect
+      const ip = espIpInput.value.trim();
+      if (!ip) { logMessage('⚠️ Enter an IP address first.'); return; }
+
+      const url = ip.startsWith('http') ? ip : `http://${ip}`;
+      btnConnect.textContent = '⏳ Connecting...';
+      btnConnect.disabled    = true;
+      logMessage(`Connecting to ESP32 at ${url}…`);
+
+      try {
+        const res = await fetch(`${url}/wifi`, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) throw new Error('Bad response');
+
+        isConnected = true;
+        espBaseUrl  = url;
+        btnConnect.textContent = '⏏ Disconnect';
+        btnConnect.classList.add('connected');
+        connectedIpText.textContent = `Connected to ${ip}`;
+        connectedIpDisplay.classList.add('visible');
+        refreshLabel.textContent = 'Connected';
+        logMessage(`✅ Connected to ESP32 at ${ip}. Auto-scanning every 3s.`);
+
+        // Immediate scan
+        await fetchSignals();
+        // Schedule every 3 seconds
+        scanInterval = setInterval(fetchSignals, 3000);
+      } catch (err) {
+        if (window.location.protocol === 'https:' && url.startsWith('http:')) {
+          alert("⚠️ BROWSER SECURITY BLOCK ⚠️\n\nYour browser is blocking the connection to the ESP32 because Vercel uses HTTPS and the ESP32 uses HTTP.\n\nTo fix this:\n1. Tap the Lock/Settings icon in your URL address bar.\n2. Go to Site Settings / Permissions.\n3. Find 'Insecure Content' (or Mixed Content) and change it to ALLOW.\n4. Reload the page.");
+        }
+        logMessage(`❌ Could not reach ESP32 at ${url}. Is the device on?`);
+        btnConnect.textContent = 'Connect';
+        refreshDot.style.backgroundColor = '#e11d48';
+      } finally {
+        btnConnect.disabled = false;
+      }
+    });
+
     // ─── Init ─────────────────────────────────────────────────────────────────
     window.addEventListener('load', () => {
       // Open settings sheet on first run if profile is incomplete.
@@ -1329,6 +2080,9 @@
       } else {
         logMessage('SYS: App initialized. Mode: Wireless Radar.');
       }
+
+      // Start radar animation
+      animateRadar();
     });
   </script>
 </body>
