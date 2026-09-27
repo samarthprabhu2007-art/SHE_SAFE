@@ -184,6 +184,23 @@
       margin: 0 auto;
     }
 
+    .canvas-placeholder.camera-active {
+      aspect-ratio: 16 / 9;
+      max-width: 640px;
+      max-height: none;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #detectionOverlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -513,21 +530,41 @@
       <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <span class="card-title" style="margin-bottom: 0;">Optical IR Scanner</span>
-          <span class="status-badge" style="background-color: rgba(59, 130, 246, 0.15); color: var(--accent-blue);">
-            <span class="status-dot" style="background-color: var(--accent-blue);"></span> Camera Ready
+          <span class="status-badge" id="cameraStatus" style="background-color: rgba(59, 130, 246, 0.15); color: var(--accent-blue);">
+            <span class="status-dot" style="background-color: var(--accent-blue);"></span> Camera Off
           </span>
         </div>
         <div class="canvas-placeholder" id="cameraCanvasContainer">
-          <span style="font-size: 2rem;">📷</span>
-          <span>IR Lens Blink Detector</span>
-          <span style="font-size: 0.75rem; color: #5a657c;">(320x240 Client-Side Computer Vision)</span>
+          <video
+            id="cameraPreview"
+            autoplay
+            muted
+            playsinline
+            style="display: none; width: 100%; height: 100%; object-fit: contain; background-color: #000000; border-radius: 12px;"
+          ></video>
+          <canvas id="processingCanvas" width="320" height="240" hidden></canvas>
+          <canvas id="detectionOverlay" width="320" height="240"></canvas>
+          <div id="cameraPlaceholder" style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+            <span style="font-size: 2rem;">📷</span>
+            <span>IR Lens Blink Detector</span>
+            <span style="font-size: 0.75rem; color: #5a657c;">(320×240 Client-Side Computer Vision)</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 12px;">
+          <button class="btn btn-secondary" id="cameraToggleBtn" style="flex: 1;">
+            Turn Camera On
+          </button>
+          <button class="btn btn-secondary" id="simulationToggleBtn" style="flex: 1;" disabled>
+            Run Demo Blink
+          </button>
         </div>
       </div>
 
       <div class="card">
         <div class="card-title">Detection Threshold & Threat Score</div>
         <div style="font-size: 0.85rem; color: var(--text-muted);">
-          Blink Analysis Score: <strong style="color: var(--text-main);">0%</strong> (No optical target detected)
+          Blink Analysis Score: <strong id="blinkScore" style="color: var(--text-main);">0%</strong>
+          <span id="blinkStatus">(No optical target detected)</span>
         </div>
       </div>
     </div>
@@ -622,8 +659,270 @@
     const tabWired      = document.getElementById('tabWired');
     const panelWireless = document.getElementById('panelWireless');
     const panelWired    = document.getElementById('panelWired');
+    const cameraCanvasContainer = document.getElementById('cameraCanvasContainer');
+    const cameraPreview = document.getElementById('cameraPreview');
+    const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+    const cameraToggleBtn = document.getElementById('cameraToggleBtn');
+    const simulationToggleBtn = document.getElementById('simulationToggleBtn');
+    const cameraStatus = document.getElementById('cameraStatus');
+    const processingCanvas = document.getElementById('processingCanvas');
+    const processingContext = processingCanvas.getContext('2d', { willReadFrequently: true });
+    const detectionOverlay = document.getElementById('detectionOverlay');
+    const overlayContext = detectionOverlay.getContext('2d');
+    const blinkScore = document.getElementById('blinkScore');
+    const blinkStatus = document.getElementById('blinkStatus');
+    let cameraStream = null;
+    let processingFrameId = null;
+    let trackedTarget = null;
+    let brightnessHistory = [];
+    let transitions = [];
+    let lastBlinkState = false;
+    let lastTransitionAt = 0;
+    let simulationEnabled = false;
+
+    function setCameraStatus(isOn) {
+      cameraStatus.innerHTML = isOn
+        ? '<span class="status-dot"></span> Camera On'
+        : '<span class="status-dot" style="background-color: var(--accent-blue);"></span> Camera Off';
+      cameraStatus.style.backgroundColor = isOn
+        ? 'rgba(16, 185, 129, 0.15)'
+        : 'rgba(59, 130, 246, 0.15)';
+      cameraStatus.style.color = isOn ? 'var(--accent-green)' : 'var(--accent-blue)';
+    }
+
+    function rgbToHsl(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const lightness = (max + min) / 2;
+      const delta = max - min;
+      if (delta === 0) return { hue: 0, saturation: 0, lightness };
+      const saturation = delta / (1 - Math.abs(2 * lightness - 1));
+      let hue;
+      if (max === r) hue = 60 * (((g - b) / delta) % 6);
+      else if (max === g) hue = 60 * (((b - r) / delta) + 2);
+      else hue = 60 * (((r - g) / delta) + 4);
+      return { hue: hue < 0 ? hue + 360 : hue, saturation, lightness };
+    }
+
+    function isIrCandidate(r, g, b) {
+      if (r < 70 || b < 70 || r <= g + 20 || b <= g + 20) return false;
+      const hsl = rgbToHsl(r, g, b);
+      return hsl.hue >= 270 && hsl.hue <= 345 && hsl.saturation >= 0.18 && hsl.lightness >= 0.25;
+    }
+
+    function findIrBlobs(imageData) {
+      const { data, width, height } = imageData;
+      const size = width * height;
+      const matches = new Uint8Array(size);
+      for (let index = 0; index < size; index++) {
+        const offset = index * 4;
+        if (isIrCandidate(data[offset], data[offset + 1], data[offset + 2])) matches[index] = 1;
+      }
+
+      const visited = new Uint8Array(size);
+      const blobs = [];
+      for (let start = 0; start < size; start++) {
+        if (!matches[start] || visited[start]) continue;
+        const queue = [start];
+        visited[start] = 1;
+        let pixels = 0, totalX = 0, totalY = 0, totalBrightness = 0;
+        let minX = width, minY = height, maxX = 0, maxY = 0;
+
+        for (let head = 0; head < queue.length; head++) {
+          const current = queue[head];
+          const x = current % width;
+          const y = Math.floor(current / width);
+          const offset = current * 4;
+          pixels++;
+          totalX += x; totalY += y;
+          totalBrightness += (data[offset] + data[offset + 2]) / 2;
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+
+          const neighbours = [current - 1, current + 1, current - width, current + width];
+          for (const next of neighbours) {
+            if (next < 0 || next >= size || visited[next] || !matches[next]) continue;
+            const nextX = next % width;
+            if (Math.abs(nextX - x) > 1) continue;
+            visited[next] = 1;
+            queue.push(next);
+          }
+        }
+
+        const blobWidth = maxX - minX + 1;
+        const blobHeight = maxY - minY + 1;
+        if (pixels >= 3 && pixels <= 250 && blobWidth <= 50 && blobHeight <= 50) {
+          blobs.push({
+            x: totalX / pixels, y: totalY / pixels, pixels,
+            brightness: totalBrightness / pixels,
+            minX, minY, width: blobWidth, height: blobHeight
+          });
+        }
+      }
+      return blobs;
+    }
+
+    function updateBlinkAnalysis(target, now) {
+      const brightness = target ? target.brightness : 0;
+      brightnessHistory.push({ now, brightness });
+      brightnessHistory = brightnessHistory.filter(sample => now - sample.now <= 5500);
+      if (brightnessHistory.length < 8) return 0;
+
+      const values = brightnessHistory.map(sample => sample.brightness);
+      const minimum = Math.min(...values);
+      const maximum = Math.max(...values);
+      if (maximum - minimum < 18) return 0;
+
+      const isOn = brightness > (minimum + maximum) / 2;
+      if (isOn !== lastBlinkState) {
+        if (lastTransitionAt) transitions.push(now - lastTransitionAt);
+        lastTransitionAt = now;
+        lastBlinkState = isOn;
+      }
+      transitions = transitions.filter(duration => duration <= 2000).slice(-8);
+      if (transitions.length < 6) return 0;
+
+      const recent = transitions.slice(-6);
+      const matching = recent.filter(duration => duration >= 400 && duration <= 600).length;
+      const average = recent.reduce((sum, duration) => sum + duration, 0) / recent.length;
+      const jitter = Math.max(...recent.map(duration => Math.abs(duration - average))) / average;
+      return jitter <= 0.25 ? Math.round((matching / recent.length) * 100) : 0;
+    }
+
+    function drawDetection(target, score) {
+      overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
+      if (!target) return;
+      const confirmed = score >= 75;
+      overlayContext.strokeStyle = confirmed ? '#ef4444' : '#f59e0b';
+      overlayContext.lineWidth = 2;
+      overlayContext.strokeRect(target.minX - 3, target.minY - 3, target.width + 6, target.height + 6);
+      overlayContext.fillStyle = overlayContext.strokeStyle;
+      overlayContext.font = '12px sans-serif';
+      const label = simulationEnabled
+        ? 'DEMO IR SIGNAL'
+        : (confirmed ? 'CAMERA CANDIDATE' : 'IR CANDIDATE');
+      overlayContext.fillText(label, target.minX, Math.max(12, target.minY - 7));
+    }
+
+    function drawSimulationDot(now) {
+      if (!simulationEnabled || now % 1000 >= 500) return;
+      const x = 160 + Math.round(Math.sin(now / 900) * 35);
+      const y = 120;
+      processingContext.fillStyle = '#ff00ff';
+      processingContext.beginPath();
+      processingContext.arc(x, y, 5, 0, Math.PI * 2);
+      processingContext.fill();
+    }
+
+    function processCameraFrame() {
+      if (!cameraStream || cameraPreview.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        processingFrameId = requestAnimationFrame(processCameraFrame);
+        return;
+      }
+      processingContext.drawImage(cameraPreview, 0, 0, processingCanvas.width, processingCanvas.height);
+      drawSimulationDot(performance.now());
+      const blobs = findIrBlobs(processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height));
+      const target = blobs.sort((a, b) => b.brightness - a.brightness)[0] || null;
+      const score = updateBlinkAnalysis(target, performance.now());
+      blinkScore.textContent = score + '%';
+      blinkStatus.textContent = simulationEnabled
+        ? '(Demo signal: no real camera detected)'
+        : target
+        ? (score >= 75 ? '(Consistent blink pattern detected)' : '(Tracking IR candidate)')
+        : '(No optical target detected)';
+      drawDetection(target, score);
+      processingFrameId = requestAnimationFrame(processCameraFrame);
+    }
+
+    async function startCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        logMessage('Camera access is unavailable in this browser.');
+        return;
+      }
+
+      cameraToggleBtn.disabled = true;
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        cameraPreview.srcObject = cameraStream;
+        await cameraPreview.play();
+        cameraPreview.style.display = 'block';
+        cameraPlaceholder.style.display = 'none';
+        cameraCanvasContainer.classList.add('camera-active');
+        detectionOverlay.style.display = 'block';
+        simulationToggleBtn.disabled = false;
+        processCameraFrame();
+        cameraToggleBtn.textContent = 'Turn Camera Off';
+        setCameraStatus(true);
+        logMessage('Camera started. Rear-facing camera selected when available.');
+      } catch (error) {
+        const message = error.name === 'NotAllowedError'
+          ? 'Camera permission denied. Allow camera access and try again.'
+          : 'Camera could not start. Check that no other app is using it.';
+        logMessage(message);
+      } finally {
+        cameraToggleBtn.disabled = false;
+      }
+    }
+
+    function stopCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+      if (processingFrameId) {
+        cancelAnimationFrame(processingFrameId);
+        processingFrameId = null;
+      }
+      cameraPreview.srcObject = null;
+      cameraPreview.style.display = 'none';
+      cameraPlaceholder.style.display = 'flex';
+      cameraCanvasContainer.classList.remove('camera-active');
+      simulationEnabled = false;
+      simulationToggleBtn.disabled = true;
+      simulationToggleBtn.textContent = 'Run Demo Blink';
+      detectionOverlay.style.display = 'none';
+      overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
+      trackedTarget = null;
+      brightnessHistory = [];
+      transitions = [];
+      lastBlinkState = false;
+      lastTransitionAt = 0;
+      blinkScore.textContent = '0%';
+      blinkStatus.textContent = '(No optical target detected)';
+      cameraToggleBtn.textContent = 'Turn Camera On';
+      setCameraStatus(false);
+    }
+
+    cameraToggleBtn.addEventListener('click', () => {
+      if (cameraStream) {
+        stopCamera();
+        logMessage('Camera stopped.');
+      } else {
+        startCamera();
+      }
+    });
+
+    simulationToggleBtn.addEventListener('click', () => {
+      simulationEnabled = !simulationEnabled;
+      brightnessHistory = [];
+      transitions = [];
+      lastBlinkState = false;
+      lastTransitionAt = 0;
+      blinkScore.textContent = '0%';
+      simulationToggleBtn.textContent = simulationEnabled ? 'Stop Demo Blink' : 'Run Demo Blink';
+      logMessage(simulationEnabled ? 'Demo IR blink simulation started.' : 'Demo IR blink simulation stopped.');
+    });
 
     tabWireless.addEventListener('click', () => {
+      stopCamera();
       tabWireless.classList.add('active');
       tabWired.classList.remove('active');
       panelWireless.classList.add('active');
@@ -638,6 +937,8 @@
       panelWireless.classList.remove('active');
       logMessage('Switched to Mode B: Wired IR Camera Detector.');
     });
+
+    window.addEventListener('beforeunload', stopCamera);
 
     // ─── Settings / Emergency Profile ─────────────────────────────────────────
     const settingsBtn   = document.getElementById('settingsBtn');
