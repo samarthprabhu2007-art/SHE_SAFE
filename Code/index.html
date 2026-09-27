@@ -6,15 +6,15 @@
   <title>AEGIS — Hidden Camera Detector</title>
   <style>
     :root {
-      --bg-color: #0d0f17;
-      --card-bg: #161926;
-      --border-color: #262b3e;
-      --text-main: #f0f2f8;
-      --text-muted: #8c95b2;
-      --accent-blue: #3b82f6;
-      --accent-green: #10b981;
-      --sos-red: #ef4444;
-      --sos-hover: #dc2626;
+      --bg-color: #fff5f8;
+      --card-bg: #ffffff;
+      --border-color: #f2c9d8;
+      --text-main: #35212b;
+      --text-muted: #80566a;
+      --accent-blue: #d6336c;
+      --accent-green: #098968;
+      --sos-red: #e11d48;
+      --sos-hover: #be123c;
     }
 
     * {
@@ -30,7 +30,7 @@
       color: var(--text-main);
       display: flex;
       flex-direction: column;
-      height: 100vh;
+      height: 100dvh;
       overflow: hidden;
     }
 
@@ -38,7 +38,8 @@
     header {
       background-color: var(--card-bg);
       border-bottom: 1px solid var(--border-color);
-      padding: 12px 16px;
+      padding: 14px 16px;
+      box-shadow: 0 2px 12px rgba(166, 27, 77, 0.08);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -55,7 +56,7 @@
       font-size: 1.1rem;
       font-weight: 700;
       letter-spacing: 0.5px;
-      color: #ffffff;
+      color: #a61b4d;
     }
 
     .brand span {
@@ -103,7 +104,7 @@
     .mode-switcher {
       background-color: var(--card-bg);
       border: 1px solid var(--border-color);
-      border-radius: 12px;
+      border-radius: 16px;
       padding: 4px;
       display: flex;
       gap: 4px;
@@ -111,6 +112,7 @@
 
     .mode-tab {
       flex: 1;
+      min-height: 46px;
       padding: 10px 8px;
       border: none;
       background: transparent;
@@ -129,13 +131,13 @@
     .mode-tab.active {
       background-color: var(--accent-blue);
       color: #ffffff;
-      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+      box-shadow: 0 3px 10px rgba(214, 51, 108, 0.25);
     }
 
     /* Viewport Area */
     main {
       flex: 1;
-      padding: 0 16px 12px 16px;
+      padding: 0 12px 12px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -144,7 +146,7 @@
     .view-panel {
       display: none;
       flex-direction: column;
-      gap: 16px;
+      gap: 12px;
     }
 
     .view-panel.active {
@@ -154,8 +156,9 @@
     .card {
       background-color: var(--card-bg);
       border: 1px solid var(--border-color);
-      border-radius: 14px;
-      padding: 16px;
+      border-radius: 18px;
+      padding: 14px;
+      box-shadow: 0 4px 14px rgba(166, 27, 77, 0.06);
     }
 
     .card-title {
@@ -172,7 +175,7 @@
       width: 100%;
       aspect-ratio: 1;
       max-height: 280px;
-      background-color: #0b0d14;
+      background-color: #fff0f5;
       border: 1px dashed var(--border-color);
       border-radius: 12px;
       display: flex;
@@ -235,7 +238,7 @@
 
     .log-line {
       font-family: monospace;
-      color: #a0aec0;
+      color: #80566a;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -249,7 +252,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background-color: rgba(0, 0, 0, 0.75);
+      background-color: rgba(88, 23, 50, 0.35);
       display: none;
       align-items: center;
       justify-content: center;
@@ -289,8 +292,9 @@
 
     .btn {
       flex: 1;
-      padding: 10px;
-      border-radius: 8px;
+      min-height: 46px;
+      padding: 10px 14px;
+      border-radius: 12px;
       border: none;
       font-weight: 600;
       cursor: pointer;
@@ -302,7 +306,7 @@
     }
 
     .btn-secondary {
-      background-color: var(--border-color);
+      background-color: #ffe2eb;
       color: var(--text-main);
     }
 
@@ -321,14 +325,14 @@
 
     .settings-btn:hover {
       color: var(--text-main);
-      background-color: var(--border-color);
+      background-color: #ffe2eb;
     }
 
     /* Settings Bottom Sheet */
     .sheet-overlay {
       position: fixed;
       inset: 0;
-      background-color: rgba(0, 0, 0, 0.5);
+      background-color: rgba(88, 23, 50, 0.25);
       z-index: 200;
       display: none;
     }
@@ -345,7 +349,7 @@
       background-color: var(--card-bg);
       border-top: 1px solid var(--border-color);
       border-radius: 20px 20px 0 0;
-      padding: 16px 20px 32px;
+      padding: 16px 20px calc(32px + env(safe-area-inset-bottom));
       z-index: 300;
       transform: translateY(100%);
       transition: transform 0.3s ease;
@@ -358,7 +362,7 @@
     .sheet-handle {
       width: 36px;
       height: 4px;
-      background-color: var(--border-color);
+      background-color: #e9afc3;
       border-radius: 2px;
       margin: 0 auto 16px;
     }
@@ -386,7 +390,7 @@
 
     .settings-field input {
       width: 100%;
-      background-color: var(--bg-color);
+      background-color: #fff7fa;
       border: 1px solid var(--border-color);
       border-radius: 8px;
       padding: 10px 12px;
@@ -439,7 +443,7 @@
       color: var(--accent-blue);
       margin-bottom: 10px;
       padding: 8px 10px;
-      background-color: var(--bg-color);
+      background-color: #fff7fa;
       border-radius: 8px;
       border: 1px solid var(--border-color);
     }
@@ -470,6 +474,36 @@
     /* Space the code word card away from the panels above it */
     #codeWordCard {
       margin-top: 24px;
+    }
+
+    @media (max-width: 480px) {
+      header {
+        padding: 12px 14px;
+      }
+
+      .brand h1 {
+        font-size: 1rem;
+      }
+
+      .mode-switch-container {
+        padding: 10px 12px;
+      }
+
+      .mode-tab {
+        font-size: 0.78rem;
+      }
+
+      .card {
+        padding: 12px;
+      }
+
+      .canvas-placeholder.camera-active {
+        max-width: 100%;
+      }
+
+      footer {
+        padding: 9px 12px calc(9px + env(safe-area-inset-bottom));
+      }
     }
   </style>
 </head>
@@ -513,7 +547,7 @@
         <div class="canvas-placeholder" id="radarCanvasContainer">
           <span style="font-size: 2rem;">📡</span>
           <span>8-Sector Directional Radar</span>
-          <span style="font-size: 0.75rem; color: #5a657c;">(Wi-Fi / BLE Signal Gradient)</span>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">(Wi-Fi / BLE Signal Gradient)</span>
         </div>
       </div>
 
@@ -530,7 +564,7 @@
       <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <span class="card-title" style="margin-bottom: 0;">Optical IR Scanner</span>
-          <span class="status-badge" id="cameraStatus" style="background-color: rgba(59, 130, 246, 0.15); color: var(--accent-blue);">
+          <span class="status-badge" id="cameraStatus" style="background-color: rgba(214, 51, 108, 0.12); color: var(--accent-blue);">
             <span class="status-dot" style="background-color: var(--accent-blue);"></span> Camera Off
           </span>
         </div>
@@ -547,7 +581,7 @@
           <div id="cameraPlaceholder" style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
             <span style="font-size: 2rem;">📷</span>
             <span>IR Lens Blink Detector</span>
-            <span style="font-size: 0.75rem; color: #5a657c;">(320×240 Client-Side Computer Vision)</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">(320×240 Client-Side Computer Vision)</span>
           </div>
         </div>
         <div style="display: flex; gap: 10px; margin-top: 12px;">
@@ -602,7 +636,7 @@
   <!-- Footer System Log -->
   <footer>
     <div class="log-line" id="systemLog">SYS: AEGIS App initialized. Mode: Wireless Radar.</div>
-    <span style="font-size: 0.7rem; color: #4a5568;">v1.0</span>
+    <span style="font-size: 0.7rem; color: var(--text-muted);">v1.0</span>
   </footer>
 
   <!-- SOS Confirmation Modal -->
@@ -629,7 +663,7 @@
     <div class="settings-field">
       <label for="inputContact">Emergency Contact</label>
       <input type="tel" id="inputContact" value="+916360863441" readonly
-        style="opacity:0.6; cursor:not-allowed; background:rgba(255,255,255,0.04);">
+        style="opacity:0.6; cursor:not-allowed; background:#fff7fa;">
       <small style="color:var(--text-muted); font-size:0.72rem;">Pre-configured. Cannot be changed.</small>
     </div>
     <button class="btn btn-danger" id="saveSettings" style="width:100%; margin-top:8px;">Save</button>
@@ -686,7 +720,7 @@
         : '<span class="status-dot" style="background-color: var(--accent-blue);"></span> Camera Off';
       cameraStatus.style.backgroundColor = isOn
         ? 'rgba(16, 185, 129, 0.15)'
-        : 'rgba(59, 130, 246, 0.15)';
+        : 'rgba(214, 51, 108, 0.12)';
       cameraStatus.style.color = isOn ? 'var(--accent-green)' : 'var(--accent-blue)';
     }
 
