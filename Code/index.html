@@ -914,10 +914,11 @@
       </div>
 
       <div class="card">
-        <div class="card-title">Detection Threshold &amp; Threat Score</div>
+        <div class="card-title">IR LED Blink Verification</div>
         <div style="font-size: 0.85rem; color: var(--text-muted);">
-          Blink Analysis Score: <strong id="blinkScore" style="color: var(--text-main);">0%</strong>
+          Blink Match: <strong id="blinkScore" style="color: var(--text-main);">0%</strong>
           <span id="blinkStatus">(No optical target detected)</span>
+          <div style="margin-top: 6px; font-size: 0.75rem;">Expected pattern: 500 ms on / 500 ms off (1 Hz)</div>
         </div>
       </div>
     </div>
@@ -1027,11 +1028,14 @@
     let cameraStream = null;
     let processingFrameId = null;
     let trackedTarget = null;
-    let brightnessHistory = [];
     let transitions = [];
     let lastBlinkState = false;
     let lastTransitionAt = 0;
+    let lastTargetSeenAt = 0;
+    let lastSampledState = null;
     let simulationEnabled = false;
+    const EXPECTED_LED_HALF_CYCLE_MS = 500;
+    const BLINK_TOLERANCE = 0.25;
 
     function setCameraStatus(isOn) {
       cameraStatus.innerHTML = isOn
@@ -1116,31 +1120,85 @@
       return blobs;
     }
 
-    function updateBlinkAnalysis(target, now) {
-      const brightness = target ? target.brightness : 0;
-      brightnessHistory.push({ now, brightness });
-      brightnessHistory = brightnessHistory.filter(sample => now - sample.now <= 5500);
-      if (brightnessHistory.length < 8) return 0;
+    function updateBlinkAnalysis(isOn, now) {
+      if (lastSampledState === null) {
+        lastSampledState = isOn;
+        lastBlinkState = isOn;
+        lastTransitionAt = now;
+        return 0;
+      }
 
-      const values = brightnessHistory.map(sample => sample.brightness);
-      const minimum = Math.min(...values);
-      const maximum = Math.max(...values);
-      if (maximum - minimum < 18) return 0;
-
-      const isOn = brightness > (minimum + maximum) / 2;
-      if (isOn !== lastBlinkState) {
-        if (lastTransitionAt) transitions.push(now - lastTransitionAt);
+      // Ignore brief frame noise; a real LED state should persist for a meaningful
+      // fraction of its expected 500 ms on/off interval.
+      if (isOn !== lastBlinkState && now - lastTransitionAt >= 120) {
+        const interval = now - lastTransitionAt;
+        transitions.push(interval);
         lastTransitionAt = now;
         lastBlinkState = isOn;
       }
-      transitions = transitions.filter(duration => duration <= 2000).slice(-8);
+      lastSampledState = isOn;
+      transitions = transitions.slice(-8);
       if (transitions.length < 6) return 0;
 
-      const recent = transitions.slice(-6);
-      const matching = recent.filter(duration => duration >= 400 && duration <= 600).length;
-      const average = recent.reduce((sum, duration) => sum + duration, 0) / recent.length;
-      const jitter = Math.max(...recent.map(duration => Math.abs(duration - average))) / average;
-      return jitter <= 0.25 ? Math.round((matching / recent.length) * 100) : 0;
+      const tolerance = EXPECTED_LED_HALF_CYCLE_MS * BLINK_TOLERANCE;
+      const matching = transitions.filter(interval =>
+        Math.abs(interval - EXPECTED_LED_HALF_CYCLE_MS) <= tolerance
+      ).length;
+      return Math.round((matching / transitions.length) * 100);
+    }
+
+    function sampleTrackedLedState(imageData, now) {
+      const { data, width, height } = imageData;
+      const blobs = findIrBlobs(imageData);
+      let match = null;
+
+      if (trackedTarget) {
+        const maxDistance = 24;
+        match = blobs
+          .map(blob => ({ blob, distance: Math.hypot(blob.x - trackedTarget.x, blob.y - trackedTarget.y) }))
+          .filter(candidate => candidate.distance <= maxDistance)
+          .sort((a, b) => a.distance - b.distance)[0]?.blob || null;
+      }
+      if (!trackedTarget && blobs.length) {
+        match = blobs.sort((a, b) => b.brightness - a.brightness)[0];
+      }
+
+      if (match) {
+        if (!trackedTarget) {
+          trackedTarget = { x: match.x, y: match.y, minX: match.minX, minY: match.minY, width: match.width, height: match.height };
+          transitions = [];
+          lastSampledState = null;
+        } else {
+          trackedTarget.x = trackedTarget.x * 0.7 + match.x * 0.3;
+          trackedTarget.y = trackedTarget.y * 0.7 + match.y * 0.3;
+          trackedTarget.minX = match.minX;
+          trackedTarget.minY = match.minY;
+          trackedTarget.width = match.width;
+          trackedTarget.height = match.height;
+        }
+        lastTargetSeenAt = now;
+      }
+
+      if (!trackedTarget || now - lastTargetSeenAt > 1800) {
+        trackedTarget = null;
+        transitions = [];
+        lastSampledState = null;
+        lastTransitionAt = 0;
+        return { target: null, isOn: false };
+      }
+
+      // The blob disappears during an off phase, so sample a small fixed region
+      // around its last location to distinguish on/off while keeping the target locked.
+      const cx = Math.round(trackedTarget.x);
+      const cy = Math.round(trackedTarget.y);
+      let pinkPixels = 0;
+      for (let y = Math.max(0, cy - 7); y <= Math.min(height - 1, cy + 7); y++) {
+        for (let x = Math.max(0, cx - 7); x <= Math.min(width - 1, cx + 7); x++) {
+          const offset = (y * width + x) * 4;
+          if (isIrCandidate(data[offset], data[offset + 1], data[offset + 2])) pinkPixels++;
+        }
+      }
+      return { target: trackedTarget, isOn: pinkPixels >= 2 };
     }
 
     function drawDetection(target, score) {
@@ -1154,13 +1212,13 @@
       overlayContext.font = '12px sans-serif';
       const label = simulationEnabled
         ? 'DEMO IR SIGNAL'
-        : (confirmed ? 'CAMERA CANDIDATE' : 'IR CANDIDATE');
+        : (confirmed ? 'CAMERA DETECTED' : 'VERIFYING IR BLINK');
       overlayContext.fillText(label, target.minX, Math.max(12, target.minY - 7));
     }
 
     function drawSimulationDot(now) {
       if (!simulationEnabled || now % 1000 >= 500) return;
-      const x = 160 + Math.round(Math.sin(now / 900) * 35);
+      const x = 160;
       const y = 120;
       processingContext.fillStyle = '#ff00ff';
       processingContext.beginPath();
@@ -1168,21 +1226,48 @@
       processingContext.fill();
     }
 
+    function drawCameraFrame() {
+      const sourceWidth = cameraPreview.videoWidth;
+      const sourceHeight = cameraPreview.videoHeight;
+      const sourceAspect = sourceWidth / sourceHeight;
+      const canvasAspect = processingCanvas.width / processingCanvas.height;
+      let sourceX = 0;
+      let sourceY = 0;
+      let cropWidth = sourceWidth;
+      let cropHeight = sourceHeight;
+
+      // Match the preview's object-fit: cover crop so detections and overlay boxes
+      // use the same coordinates on portrait and landscape phone cameras.
+      if (sourceAspect > canvasAspect) {
+        cropWidth = sourceHeight * canvasAspect;
+        sourceX = (sourceWidth - cropWidth) / 2;
+      } else {
+        cropHeight = sourceWidth / canvasAspect;
+        sourceY = (sourceHeight - cropHeight) / 2;
+      }
+      processingContext.drawImage(
+        cameraPreview,
+        sourceX, sourceY, cropWidth, cropHeight,
+        0, 0, processingCanvas.width, processingCanvas.height
+      );
+    }
+
     function processCameraFrame() {
       if (!cameraStream || cameraPreview.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         processingFrameId = requestAnimationFrame(processCameraFrame);
         return;
       }
-      processingContext.drawImage(cameraPreview, 0, 0, processingCanvas.width, processingCanvas.height);
+      drawCameraFrame();
       drawSimulationDot(performance.now());
-      const blobs = findIrBlobs(processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height));
-      const target = blobs.sort((a, b) => b.brightness - a.brightness)[0] || null;
-      const score = updateBlinkAnalysis(target, performance.now());
+      const now = performance.now();
+      const sample = sampleTrackedLedState(processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height), now);
+      const target = sample.target;
+      const score = target ? updateBlinkAnalysis(sample.isOn, now) : 0;
       blinkScore.textContent = score + '%';
       blinkStatus.textContent = simulationEnabled
         ? '(Demo signal: no real camera detected)'
         : target
-        ? (score >= 75 ? '(Consistent blink pattern detected)' : '(Tracking IR candidate)')
+        ? (score >= 75 ? '(LED blink matches expected rate - camera detected)' : '(IR LED candidate - verifying blink rate)')
         : '(No optical target detected)';
       drawDetection(target, score);
       processingFrameId = requestAnimationFrame(processCameraFrame);
@@ -1244,10 +1329,11 @@
       detectionOverlay.style.display = 'none';
       overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
       trackedTarget = null;
-      brightnessHistory = [];
       transitions = [];
       lastBlinkState = false;
       lastTransitionAt = 0;
+      lastTargetSeenAt = 0;
+      lastSampledState = null;
       blinkScore.textContent = '0%';
       blinkStatus.textContent = '(No optical target detected)';
       cameraToggleBtn.textContent = 'Turn Camera On';
@@ -1265,10 +1351,12 @@
 
     simulationToggleBtn.addEventListener('click', () => {
       simulationEnabled = !simulationEnabled;
-      brightnessHistory = [];
+      trackedTarget = null;
       transitions = [];
       lastBlinkState = false;
       lastTransitionAt = 0;
+      lastTargetSeenAt = 0;
+      lastSampledState = null;
       blinkScore.textContent = '0%';
       simulationToggleBtn.textContent = simulationEnabled ? 'Stop Demo Blink' : 'Run Demo Blink';
       logMessage(simulationEnabled ? 'Demo IR blink simulation started.' : 'Demo IR blink simulation stopped.');
