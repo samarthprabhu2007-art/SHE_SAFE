@@ -188,7 +188,6 @@
     }
 
     .canvas-placeholder.camera-active {
-      aspect-ratio: 4 / 3;
       max-width: 640px;
       max-height: none;
       position: relative;
@@ -763,7 +762,7 @@
       .mode-switch-container { padding: 10px 12px; }
       .mode-tab { font-size: 0.78rem; }
       .card { padding: 12px; }
-      .canvas-placeholder.camera-active { max-width: 100%; aspect-ratio: 3 / 4; }
+      .canvas-placeholder.camera-active { max-width: 100%; }
       footer { padding: 9px 12px calc(9px + env(safe-area-inset-bottom)); }
     }
   </style>
@@ -893,7 +892,7 @@
             autoplay
             muted
             playsinline
-            style="display: none; width: 100%; height: 100%; object-fit: cover; background-color: #000000; border-radius: 12px;"
+            style="display: none; width: 100%; height: 100%; object-fit: contain; background-color: #000000; border-radius: 12px;"
           ></video>
           <canvas id="processingCanvas" width="320" height="240" hidden></canvas>
           <canvas id="detectionOverlay" width="320" height="240"></canvas>
@@ -1027,12 +1026,8 @@
     const blinkStatus = document.getElementById('blinkStatus');
     let cameraStream = null;
     let processingFrameId = null;
-    let trackedTarget = null;
-    let transitions = [];
-    let lastBlinkState = false;
-    let lastTransitionAt = 0;
-    let lastTargetSeenAt = 0;
-    let lastSampledState = null;
+    let trackedTargets = [];
+    let nextTargetId = 1;
     let simulationEnabled = false;
 
     // Expected 0.5s rate: 500ms ON / 500ms OFF (1.0 Hz)
@@ -1155,7 +1150,7 @@
         const blobWidth = maxX - minX + 1;
         const blobHeight = maxY - minY + 1;
 
-        // Discard large non-LED areas (walls, shirts)
+        // Discard large non-LED surfaces (walls, shirts)
         if (pixels >= 3 && pixels <= 350 && blobWidth <= 65 && blobHeight <= 65) {
           let dominantType = 'OPTICAL';
           let maxCount = 0;
@@ -1175,47 +1170,127 @@
       return blobs;
     }
 
-    function updateBlinkAnalysis(isOn, now) {
-      if (lastSampledState === null) {
-        lastSampledState = isOn;
-        lastBlinkState = isOn;
-        lastTransitionAt = now;
-        return { score: 0, status: 'ANALYZING', interval: 0 };
-      }
+    // Multi-target tracking: tracks all lights in the scene simultaneously
+    function updateMultiTargetTracking(blobs, imageData, now) {
+      const { data, width, height } = imageData;
+      const matchedBlobIndices = new Set();
+      const maxDistance = 45;
+
+      // 1. Update existing targets
+      trackedTargets.forEach(target => {
+        let bestBlob = null;
+        let bestDist = Infinity;
+        let bestIdx = -1;
+
+        blobs.forEach((blob, idx) => {
+          if (matchedBlobIndices.has(idx)) return;
+          const dist = Math.hypot(blob.x - target.x, blob.y - target.y);
+          if (dist <= maxDistance && dist < bestDist) {
+            bestDist = dist;
+            bestBlob = blob;
+            bestIdx = idx;
+          }
+        });
+
+        if (bestBlob) {
+          // Matched blob: target is ON
+          matchedBlobIndices.add(bestIdx);
+          target.x = target.x * 0.6 + bestBlob.x * 0.4;
+          target.y = target.y * 0.6 + bestBlob.y * 0.4;
+          target.minX = bestBlob.minX;
+          target.minY = bestBlob.minY;
+          target.width = bestBlob.width;
+          target.height = bestBlob.height;
+          target.type = bestBlob.type;
+          target.lastSeen = now;
+          target.isOn = true;
+        } else {
+          // No blob matched: check localized 8px box to see if target is dark (OFF)
+          const cx = Math.round(target.x);
+          const cy = Math.round(target.y);
+          let opticalPixels = 0;
+          for (let y = Math.max(0, cy - 8); y <= Math.min(height - 1, cy + 8); y++) {
+            for (let x = Math.max(0, cx - 8); x <= Math.min(width - 1, cx + 8); x++) {
+              const offset = (y * width + x) * 4;
+              if (getOpticalCandidate(data[offset], data[offset + 1], data[offset + 2])) opticalPixels++;
+            }
+          }
+          target.isOn = (opticalPixels >= 2);
+        }
+
+        // Analyze blink rate for this target
+        analyzeTargetBlink(target, now);
+      });
+
+      // 2. Remove targets not seen for > 2000 ms
+      trackedTargets = trackedTargets.filter(t => (now - t.lastSeen) <= 2000);
+
+      // 3. Create new targets for unmatched blobs (up to max 8 concurrent targets)
+      blobs.forEach((blob, idx) => {
+        if (matchedBlobIndices.has(idx)) return;
+        if (trackedTargets.length >= 8) return;
+
+        trackedTargets.push({
+          id: nextTargetId++,
+          x: blob.x,
+          y: blob.y,
+          minX: blob.minX,
+          minY: blob.minY,
+          width: blob.width,
+          height: blob.height,
+          type: blob.type,
+          isOn: true,
+          lastSeen: now,
+          lastBlinkState: true,
+          lastTransitionAt: now,
+          transitions: [],
+          score: 0,
+          status: 'ANALYZING',
+          interval: 0
+        });
+      });
+    }
+
+    function analyzeTargetBlink(target, now) {
+      const isOn = target.isOn;
 
       // Detect state transition with debounce (ignore < 130ms frame noise)
-      if (isOn !== lastBlinkState && (now - lastTransitionAt >= 130)) {
-        const interval = now - lastTransitionAt;
-        lastBlinkState = isOn;
-        lastTransitionAt = now;
+      if (isOn !== target.lastBlinkState && (now - target.lastTransitionAt >= 130)) {
+        const interval = now - target.lastTransitionAt;
+        target.lastBlinkState = isOn;
+        target.lastTransitionAt = now;
 
-        // Valid half-cycle transition around 500ms
         if (interval >= MIN_VALID_HALF_CYCLE_MS && interval <= MAX_VALID_HALF_CYCLE_MS) {
-          transitions.push(interval);
-          if (transitions.length > 8) transitions.shift();
+          target.transitions.push(interval);
+          if (target.transitions.length > 8) target.transitions.shift();
         } else if (interval > MAX_VALID_HALF_CYCLE_MS) {
-          transitions = [];
+          target.transitions = [];
         }
       }
-      lastSampledState = isOn;
 
-      const timeInCurrentState = now - lastTransitionAt;
+      const timeInCurrentState = now - target.lastTransitionAt;
 
-      // REJECT STATIC LIGHTS / OBJECTS:
-      // If the light remains ON continuously for > 800ms without turning off,
-      // it is a static reflection/light, NOT a 0.5s blinking spy camera!
+      // STATIC LIGHT REJECTION:
+      // If this specific light stays ON continuously for > 800ms without turning off,
+      // it is a static lamp/LED reflection. Score = 0% and threat rejected.
       if (isOn && timeInCurrentState > STATIC_THRESHOLD_MS) {
-        transitions = [];
-        return { score: 0, status: 'STATIC', interval: 0 };
+        target.transitions = [];
+        target.status = 'STATIC';
+        target.score = 0;
+        target.interval = 0;
+        return;
       }
 
-      // If no blink transitions yet or too few to verify rhythm
-      if (transitions.length < 3) {
-        return { score: Math.round((transitions.length / 3) * 35), status: 'ANALYZING', interval: 0 };
+      // If too few transitions to confirm rhythm
+      if (target.transitions.length < 3) {
+        target.status = 'ANALYZING';
+        target.score = Math.round((target.transitions.length / 3) * 35);
+        target.interval = 0;
+        return;
       }
 
-      // Evaluate 0.5s pattern consistency
-      const recent = transitions.slice(-6);
+      // Evaluate 0.5s (500ms) pattern consistency
+      const recent = target.transitions.slice(-6);
       const avg = recent.reduce((sum, d) => sum + d, 0) / recent.length;
       const matching = recent.filter(d => Math.abs(d - EXPECTED_LED_HALF_CYCLE_MS) <= 140).length;
       const matchRatio = matching / recent.length;
@@ -1227,144 +1302,80 @@
         if (recent.length === 3) score = Math.min(score, 78);
         else score = Math.min(100, Math.max(75, score));
 
-        const confirmed = score >= 70;
-        return { score, status: confirmed ? 'CONFIRMED' : 'ANALYZING', interval: Math.round(avg) };
+        target.score = score;
+        target.status = score >= 70 ? 'CONFIRMED' : 'ANALYZING';
+        target.interval = Math.round(avg);
       } else {
-        return { score: 0, status: 'WRONG_RATE', interval: Math.round(avg) };
+        target.score = 0;
+        target.status = 'WRONG_RATE';
+        target.interval = Math.round(avg);
       }
     }
 
-    function sampleTrackedLedState(imageData, now) {
-      const { data, width, height } = imageData;
-      const blobs = findOpticalBlobs(imageData);
-      let match = null;
-
-      if (trackedTarget) {
-        // Generous 50px matching radius to maintain track during 500ms dark phase
-        const maxDistance = 50;
-        match = blobs
-          .map(blob => ({ blob, distance: Math.hypot(blob.x - trackedTarget.x, blob.y - trackedTarget.y) }))
-          .filter(candidate => candidate.distance <= maxDistance)
-          .sort((a, b) => a.distance - b.distance)[0]?.blob || null;
-      }
-      if (!trackedTarget && blobs.length) {
-        match = blobs.sort((a, b) => b.brightness - a.brightness)[0];
-      }
-
-      if (match) {
-        if (!trackedTarget) {
-          trackedTarget = {
-            x: match.x, y: match.y,
-            minX: match.minX, minY: match.minY,
-            width: match.width, height: match.height,
-            type: match.type
-          };
-          transitions = [];
-          lastSampledState = true;
-          lastBlinkState = true;
-          lastTransitionAt = now;
-        } else {
-          trackedTarget.x = trackedTarget.x * 0.6 + match.x * 0.4;
-          trackedTarget.y = trackedTarget.y * 0.6 + match.y * 0.4;
-          trackedTarget.minX = match.minX;
-          trackedTarget.minY = match.minY;
-          trackedTarget.width = match.width;
-          trackedTarget.height = match.height;
-          trackedTarget.type = match.type;
-        }
-        lastTargetSeenAt = now;
-      }
-
-      if (!trackedTarget || (now - lastTargetSeenAt > 2000)) {
-        trackedTarget = null;
-        transitions = [];
-        lastSampledState = null;
-        lastTransitionAt = 0;
-        return { target: null, isOn: false };
-      }
-
-      if (match) {
-        return { target: trackedTarget, isOn: true };
-      }
-
-      // Check small localized box if LED went off
-      const cx = Math.round(trackedTarget.x);
-      const cy = Math.round(trackedTarget.y);
-      let opticalPixels = 0;
-      for (let y = Math.max(0, cy - 8); y <= Math.min(height - 1, cy + 8); y++) {
-        for (let x = Math.max(0, cx - 8); x <= Math.min(width - 1, cx + 8); x++) {
-          const offset = (y * width + x) * 4;
-          if (getOpticalCandidate(data[offset], data[offset + 1], data[offset + 2])) opticalPixels++;
-        }
-      }
-      return { target: trackedTarget, isOn: opticalPixels >= 2 };
-    }
-
-    function drawDetection(target, result) {
+    // Draws overlay boxes for all simultaneously tracked targets
+    function drawDetections(targets) {
       overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
-      if (!target) return;
+      if (!targets || targets.length === 0) return;
 
-      const { score, status, interval } = result;
-
-      // Coordinate scaling from processingCanvas (320x240) to visible overlay canvas
       const scaleX = detectionOverlay.width / processingCanvas.width;
       const scaleY = detectionOverlay.height / processingCanvas.height;
 
-      const screenX = target.minX * scaleX;
-      const screenY = target.minY * scaleY;
-      const screenW = target.width * scaleX;
-      const screenH = target.height * scaleY;
+      targets.forEach(target => {
+        const screenX = target.minX * scaleX;
+        const screenY = target.minY * scaleY;
+        const screenW = target.width * scaleX;
+        const screenH = target.height * scaleY;
 
-      const typeLabel = target.type ? target.type : 'OPTICAL';
-      let strokeColor = '#f59e0b';
-      let label = `VERIFYING ${typeLabel} BLINK...`;
-      let lineDash = [];
+        const typeLabel = target.type ? target.type : 'OPTICAL';
+        let strokeColor = '#f59e0b';
+        let label = `VERIFYING ${typeLabel}...`;
+        let lineDash = [];
 
-      if (simulationEnabled) {
-        strokeColor = '#ef4444';
-        label = `DEMO IR SIGNAL (${score}%)`;
-      } else if (status === 'CONFIRMED') {
-        strokeColor = '#ef4444';
-        const rateText = interval > 0 ? ` (~${(interval / 1000).toFixed(2)}s)` : ' (~0.5s)';
-        label = `⚠️ CAMERA DETECTED [${typeLabel}]${rateText}`;
-      } else if (status === 'STATIC') {
-        strokeColor = '#94a3b8';
-        label = `STATIC ${typeLabel} (IGNORED)`;
-        lineDash = [4, 4];
-      } else if (status === 'WRONG_RATE') {
-        strokeColor = '#eab308';
-        label = `${typeLabel} BLINK: ${(interval / 1000).toFixed(2)}s (NOT 0.5s)`;
-        lineDash = [3, 3];
-      } else {
-        strokeColor = '#3b82f6';
-        label = `ANALYZING ${typeLabel} (${score}%)`;
-        lineDash = [2, 2];
-      }
+        if (simulationEnabled) {
+          strokeColor = '#ef4444';
+          label = `DEMO IR SIGNAL (${target.score}%)`;
+        } else if (target.status === 'CONFIRMED') {
+          strokeColor = '#ef4444'; // Bright Red Alert
+          const rateText = target.interval > 0 ? ` (~${(target.interval / 1000).toFixed(2)}s)` : ' (~0.5s)';
+          label = `⚠️ CAMERA DETECTED [${typeLabel}]${rateText}`;
+        } else if (target.status === 'STATIC') {
+          strokeColor = '#94a3b8'; // Muted grey
+          label = `STATIC ${typeLabel} (IGNORED)`;
+          lineDash = [4, 4];
+        } else if (target.status === 'WRONG_RATE') {
+          strokeColor = '#eab308';
+          label = `${typeLabel}: ${(target.interval / 1000).toFixed(2)}s (NOT 0.5s)`;
+          lineDash = [3, 3];
+        } else {
+          strokeColor = '#3b82f6';
+          label = `ANALYZING ${typeLabel} (${target.score}%)`;
+          lineDash = [2, 2];
+        }
 
-      overlayContext.save();
-      overlayContext.strokeStyle = strokeColor;
-      overlayContext.lineWidth = (status === 'CONFIRMED') ? 3 : 2;
-      overlayContext.setLineDash(lineDash);
+        overlayContext.save();
+        overlayContext.strokeStyle = strokeColor;
+        overlayContext.lineWidth = (target.status === 'CONFIRMED') ? 3 : 2;
+        overlayContext.setLineDash(lineDash);
 
-      const pad = 4;
-      overlayContext.strokeRect(screenX - pad, screenY - pad, screenW + pad * 2, screenH + pad * 2);
-      overlayContext.setLineDash([]);
+        const pad = 4;
+        overlayContext.strokeRect(screenX - pad, screenY - pad, screenW + pad * 2, screenH + pad * 2);
+        overlayContext.setLineDash([]);
 
-      overlayContext.font = 'bold 11px system-ui, -apple-system, sans-serif';
-      const textWidth = overlayContext.measureText(label).width;
-      const labelY = Math.max(14, screenY - 8);
+        overlayContext.font = 'bold 11px system-ui, -apple-system, sans-serif';
+        const textWidth = overlayContext.measureText(label).width;
+        const labelY = Math.max(14, screenY - 8);
 
-      overlayContext.fillStyle = strokeColor;
-      overlayContext.fillRect(screenX - pad, labelY - 12, textWidth + 8, 15);
+        overlayContext.fillStyle = strokeColor;
+        overlayContext.fillRect(screenX - pad, labelY - 12, textWidth + 8, 15);
 
-      overlayContext.fillStyle = '#ffffff';
-      overlayContext.fillText(label, screenX - pad + 4, labelY);
-      overlayContext.restore();
+        overlayContext.fillStyle = '#ffffff';
+        overlayContext.fillText(label, screenX - pad + 4, labelY);
+        overlayContext.restore();
+      });
     }
 
     function drawSimulationDot(now) {
       if (!simulationEnabled) return;
-      // Exact 500ms ON / 500ms OFF blink cycle
       const isSimOn = Math.floor(now / 500) % 2 === 1;
       if (!isSimOn) return;
       const x = 160;
@@ -1375,8 +1386,19 @@
       processingContext.fill();
     }
 
+    // Draws uncropped, unzoomed full field-of-view camera frame
     function drawCameraFrame() {
-      // Synchronize overlay canvas pixel dimensions to the actual visible DOM container
+      const sourceWidth = cameraPreview.videoWidth;
+      const sourceHeight = cameraPreview.videoHeight;
+      if (!sourceWidth || !sourceHeight) return;
+
+      // Automatically size the container to match the camera's native aspect ratio (NO AUTO-ZOOM!)
+      const expectedAspect = sourceWidth + ' / ' + sourceHeight;
+      if (cameraCanvasContainer.style.aspectRatio !== expectedAspect) {
+        cameraCanvasContainer.style.aspectRatio = expectedAspect;
+      }
+
+      // Synchronize overlay canvas pixel dimensions to the visible container
       const containerRect = cameraCanvasContainer.getBoundingClientRect();
       const containerW = Math.round(containerRect.width);
       const containerH = Math.round(containerRect.height);
@@ -1387,30 +1409,10 @@
         }
       }
 
-      const sourceWidth = cameraPreview.videoWidth;
-      const sourceHeight = cameraPreview.videoHeight;
-      const containerAspect = (containerW > 0 && containerH > 0)
-        ? (containerW / containerH)
-        : (processingCanvas.width / processingCanvas.height);
-      const sourceAspect = sourceWidth / sourceHeight;
-
-      let sourceX = 0;
-      let sourceY = 0;
-      let cropWidth = sourceWidth;
-      let cropHeight = sourceHeight;
-
-      // Exactly matches the browser's `object-fit: cover` on <video>
-      if (sourceAspect > containerAspect) {
-        cropWidth = sourceHeight * containerAspect;
-        sourceX = (sourceWidth - cropWidth) / 2;
-      } else {
-        cropHeight = sourceWidth / containerAspect;
-        sourceY = (sourceHeight - cropHeight) / 2;
-      }
-
+      // Draw full uncropped camera feed directly onto processing canvas
       processingContext.drawImage(
         cameraPreview,
-        sourceX, sourceY, cropWidth, cropHeight,
+        0, 0, sourceWidth, sourceHeight,
         0, 0, processingCanvas.width, processingCanvas.height
       );
     }
@@ -1423,34 +1425,37 @@
       drawCameraFrame();
       drawSimulationDot(performance.now());
       const now = performance.now();
-      const sample = sampleTrackedLedState(processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height), now);
-      const target = sample.target;
-      const result = target ? updateBlinkAnalysis(sample.isOn, now) : { score: 0, status: 'NONE', interval: 0 };
+      const imgData = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
+      const blobs = findOpticalBlobs(imgData);
 
-      blinkScore.textContent = result.score + '%';
-      const typeDesc = (target && target.type) ? target.type : 'Optical';
+      updateMultiTargetTracking(blobs, imgData, now);
+
+      // Determine highest threat among all simultaneously tracked targets
+      const confirmedTarget = trackedTargets.find(t => t.status === 'CONFIRMED');
+      const analyzingTarget = trackedTargets.find(t => t.status === 'ANALYZING');
+      const maxScore = trackedTargets.reduce((max, t) => Math.max(max, t.score), 0);
+
+      blinkScore.textContent = maxScore + '%';
 
       if (simulationEnabled) {
         blinkStatus.textContent = '(Demo 0.5s IR blink signal simulated)';
         blinkStatus.style.color = 'var(--accent-blue)';
-      } else if (!target) {
+      } else if (trackedTargets.length === 0) {
         blinkStatus.textContent = '(No optical target detected)';
         blinkStatus.style.color = 'var(--text-muted)';
-      } else if (result.status === 'CONFIRMED') {
-        blinkStatus.textContent = '🚨 0.5s Blink verified (~' + result.interval + 'ms) — ' + typeDesc + ' Camera Detected!';
+      } else if (confirmedTarget) {
+        blinkStatus.textContent = '🚨 0.5s Blink verified (~' + confirmedTarget.interval + 'ms) — ' + confirmedTarget.type + ' Camera Detected!';
         blinkStatus.style.color = '#ef4444';
-      } else if (result.status === 'STATIC') {
-        blinkStatus.textContent = '❌ Static ' + typeDesc + ' light detected (not blinking at 0.5s) — Threat rejected';
-        blinkStatus.style.color = '#94a3b8';
-      } else if (result.status === 'WRONG_RATE') {
-        blinkStatus.textContent = '⚠️ ' + typeDesc + ' blinking at ~' + result.interval + 'ms (expected 500ms / 0.5s)';
-        blinkStatus.style.color = '#eab308';
-      } else {
-        blinkStatus.textContent = '⏳ ' + typeDesc + ' pulse detected — verifying 0.5s blink rate (' + result.score + '% match)...';
+      } else if (analyzingTarget) {
+        blinkStatus.textContent = '⏳ ' + analyzingTarget.type + ' pulse detected — verifying 0.5s rate (' + analyzingTarget.score + '% match)...';
         blinkStatus.style.color = 'var(--accent-blue)';
+      } else {
+        // Only static or wrong rate targets present
+        blinkStatus.textContent = '❌ Static lights detected (not blinking at 0.5s) — Threat rejected';
+        blinkStatus.style.color = '#94a3b8';
       }
 
-      drawDetection(target, result);
+      drawDetections(trackedTargets);
       processingFrameId = requestAnimationFrame(processCameraFrame);
     }
 
@@ -1509,12 +1514,7 @@
       simulationToggleBtn.textContent = 'Run Demo Blink';
       detectionOverlay.style.display = 'none';
       overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
-      trackedTarget = null;
-      transitions = [];
-      lastBlinkState = false;
-      lastTransitionAt = 0;
-      lastTargetSeenAt = 0;
-      lastSampledState = null;
+      trackedTargets = [];
       blinkScore.textContent = '0%';
       blinkStatus.textContent = '(No optical target detected)';
       cameraToggleBtn.textContent = 'Turn Camera On';
@@ -1532,12 +1532,7 @@
 
     simulationToggleBtn.addEventListener('click', () => {
       simulationEnabled = !simulationEnabled;
-      trackedTarget = null;
-      transitions = [];
-      lastBlinkState = false;
-      lastTransitionAt = 0;
-      lastTargetSeenAt = 0;
-      lastSampledState = null;
+      trackedTargets = [];
       blinkScore.textContent = '0%';
       simulationToggleBtn.textContent = simulationEnabled ? 'Stop Demo Blink' : 'Run Demo Blink';
       logMessage(simulationEnabled ? 'Demo IR blink simulation started.' : 'Demo IR blink simulation stopped.');
