@@ -894,12 +894,12 @@
             playsinline
             style="display: none; width: 100%; height: 100%; object-fit: contain; background-color: #000000; border-radius: 12px;"
           ></video>
-          <canvas id="processingCanvas" width="320" height="240" hidden></canvas>
-          <canvas id="detectionOverlay" width="320" height="240"></canvas>
+          <canvas id="processingCanvas" width="480" height="360" hidden></canvas>
+          <canvas id="detectionOverlay" width="480" height="360"></canvas>
           <div id="cameraPlaceholder" style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
             <span style="font-size: 2rem;">📷</span>
             <span>IR Lens Blink Detector</span>
-            <span style="font-size: 0.75rem; color: var(--text-muted);">(320×240 Client-Side Computer Vision)</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">(480×360 Client-Side Computer Vision)</span>
           </div>
         </div>
         <div style="display: flex; gap: 10px; margin-top: 12px;">
@@ -1090,9 +1090,17 @@
       if (r >= 140 && g >= 95 && b < 90 && (r > b + 45)) {
         return { type: 'AMBER', name: 'Amber LED' };
       }
-      // 7. General concentrated bright optical spot
+      // 7. Any bright, saturated colour (including colours not covered above).
+      // The brightness floor is deliberately lower than the old white-only floor,
+      // so dimmer LEDs still register after camera exposure adjustments.
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
       const lum = (0.299 * r + 0.587 * g + 0.114 * b);
-      if (lum >= 175) {
+      if (max >= 145 && (max - min) >= 35 && lum >= 95) {
+        return { type: 'COLOR', name: 'Bright Color' };
+      }
+      // 8. General concentrated bright optical spot, including glare/white LEDs.
+      if (lum >= 155) {
         return { type: 'OPTICAL', name: 'Optical Light' };
       }
       return null;
@@ -1151,7 +1159,7 @@
         const blobHeight = maxY - minY + 1;
 
         // Discard large non-LED surfaces (walls, shirts)
-        if (pixels >= 3 && pixels <= 350 && blobWidth <= 65 && blobHeight <= 65) {
+        if (pixels >= 2 && pixels <= 1800 && blobWidth <= 100 && blobHeight <= 100) {
           let dominantType = 'OPTICAL';
           let maxCount = 0;
           for (const [k, v] of Object.entries(typeCounts)) {
@@ -1174,7 +1182,7 @@
     function updateMultiTargetTracking(blobs, imageData, now) {
       const { data, width, height } = imageData;
       const matchedBlobIndices = new Set();
-      const maxDistance = 45;
+      const maxDistance = 65;
 
       // 1. Update existing targets
       trackedTargets.forEach(target => {
@@ -1205,17 +1213,18 @@
           target.lastSeen = now;
           target.isOn = true;
         } else {
-          // No blob matched: check localized 8px box to see if target is dark (OFF)
+          // No blob matched: sample around the previous footprint to detect OFF.
           const cx = Math.round(target.x);
           const cy = Math.round(target.y);
+          const radius = Math.max(8, Math.min(18, Math.ceil(Math.max(target.width, target.height) * 0.75)));
           let opticalPixels = 0;
-          for (let y = Math.max(0, cy - 8); y <= Math.min(height - 1, cy + 8); y++) {
-            for (let x = Math.max(0, cx - 8); x <= Math.min(width - 1, cx + 8); x++) {
+          for (let y = Math.max(0, cy - radius); y <= Math.min(height - 1, cy + radius); y++) {
+            for (let x = Math.max(0, cx - radius); x <= Math.min(width - 1, cx + radius); x++) {
               const offset = (y * width + x) * 4;
               if (getOpticalCandidate(data[offset], data[offset + 1], data[offset + 2])) opticalPixels++;
             }
           }
-          target.isOn = (opticalPixels >= 2);
+          target.isOn = (opticalPixels >= Math.max(2, Math.floor(target.width * target.height * 0.08)));
         }
 
         // Analyze blink rate for this target
@@ -1475,6 +1484,25 @@
           },
           audio: false
         });
+        // Prefer 1× zoom and continuous focus/exposure where the browser exposes
+        // those controls. Unsupported controls are simply left at device defaults.
+        const videoTrack = cameraStream.getVideoTracks()[0];
+        if (videoTrack && videoTrack.getCapabilities && videoTrack.applyConstraints) {
+          const capabilities = videoTrack.getCapabilities();
+          const deviceControls = {};
+          if (capabilities.zoom && capabilities.zoom.min <= 1 && capabilities.zoom.max >= 1) {
+            deviceControls.zoom = 1;
+          }
+          if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+            deviceControls.focusMode = 'continuous';
+          }
+          if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
+            deviceControls.exposureMode = 'continuous';
+          }
+          if (Object.keys(deviceControls).length) {
+            try { await videoTrack.applyConstraints({ advanced: [deviceControls] }); } catch (_) { /* Keep browser defaults. */ }
+          }
+        }
         cameraPreview.srcObject = cameraStream;
         await cameraPreview.play();
         cameraPreview.style.display = 'block';
