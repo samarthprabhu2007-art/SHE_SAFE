@@ -1034,8 +1034,12 @@
     let lastTargetSeenAt = 0;
     let lastSampledState = null;
     let simulationEnabled = false;
+
+    // Expected 0.5s rate: 500ms ON / 500ms OFF (1.0 Hz)
     const EXPECTED_LED_HALF_CYCLE_MS = 500;
-    const BLINK_TOLERANCE = 0.25;
+    const MIN_VALID_HALF_CYCLE_MS = 280;
+    const MAX_VALID_HALF_CYCLE_MS = 750;
+    const STATIC_THRESHOLD_MS = 800; // Continuous ON > 800ms means static pink object (NOT blinking!)
 
     function setCameraStatus(isOn) {
       cameraStatus.innerHTML = isOn
@@ -1063,9 +1067,18 @@
     }
 
     function isIrCandidate(r, g, b) {
-      if (r < 70 || b < 70 || r <= g + 20 || b <= g + 20) return false;
-      const hsl = rgbToHsl(r, g, b);
-      return hsl.hue >= 270 && hsl.hue <= 345 && hsl.saturation >= 0.18 && hsl.lightness >= 0.25;
+      // Standard purple/magenta IR glow
+      if (r >= 65 && b >= 65 && (r > g + 12 || b > g + 12)) {
+        const hsl = rgbToHsl(r, g, b);
+        if (hsl.hue >= 265 && hsl.hue <= 350 && hsl.saturation >= 0.16 && hsl.lightness >= 0.22) {
+          return true;
+        }
+      }
+      // Bright white-pink saturated center of IR LED
+      if (r > 200 && b > 200 && g > 160 && (r > g + 6 || b > g + 6)) {
+        return true;
+      }
+      return false;
     }
 
     function findIrBlobs(imageData) {
@@ -1109,7 +1122,7 @@
 
         const blobWidth = maxX - minX + 1;
         const blobHeight = maxY - minY + 1;
-        if (pixels >= 3 && pixels <= 250 && blobWidth <= 50 && blobHeight <= 50) {
+        if (pixels >= 3 && pixels <= 300 && blobWidth <= 60 && blobHeight <= 60) {
           blobs.push({
             x: totalX / pixels, y: totalY / pixels, pixels,
             brightness: totalBrightness / pixels,
@@ -1125,26 +1138,58 @@
         lastSampledState = isOn;
         lastBlinkState = isOn;
         lastTransitionAt = now;
-        return 0;
+        return { score: 0, status: 'ANALYZING', interval: 0 };
       }
 
-      // Ignore brief frame noise; a real LED state should persist for a meaningful
-      // fraction of its expected 500 ms on/off interval.
-      if (isOn !== lastBlinkState && now - lastTransitionAt >= 120) {
+      // Detect state transition with debounce (ignore < 130ms frame noise)
+      if (isOn !== lastBlinkState && (now - lastTransitionAt >= 130)) {
         const interval = now - lastTransitionAt;
-        transitions.push(interval);
-        lastTransitionAt = now;
         lastBlinkState = isOn;
+        lastTransitionAt = now;
+
+        // Valid half-cycle transition around 500ms
+        if (interval >= MIN_VALID_HALF_CYCLE_MS && interval <= MAX_VALID_HALF_CYCLE_MS) {
+          transitions.push(interval);
+          if (transitions.length > 8) transitions.shift();
+        } else if (interval > MAX_VALID_HALF_CYCLE_MS) {
+          transitions = [];
+        }
       }
       lastSampledState = isOn;
-      transitions = transitions.slice(-8);
-      if (transitions.length < 6) return 0;
 
-      const tolerance = EXPECTED_LED_HALF_CYCLE_MS * BLINK_TOLERANCE;
-      const matching = transitions.filter(interval =>
-        Math.abs(interval - EXPECTED_LED_HALF_CYCLE_MS) <= tolerance
-      ).length;
-      return Math.round((matching / transitions.length) * 100);
+      const timeInCurrentState = now - lastTransitionAt;
+
+      // REJECT STATIC PINK COLOR:
+      // If the pink object remains ON continuously for > 800ms without turning off,
+      // it is a static pink reflection/object, NOT a 0.5s blinking spy camera!
+      if (isOn && timeInCurrentState > STATIC_THRESHOLD_MS) {
+        transitions = [];
+        return { score: 0, status: 'STATIC', interval: 0 };
+      }
+
+      // If no blink transitions yet or too few to verify rhythm
+      if (transitions.length < 3) {
+        return { score: Math.round((transitions.length / 3) * 35), status: 'ANALYZING', interval: 0 };
+      }
+
+      // Evaluate 0.5s pattern consistency
+      const recent = transitions.slice(-6);
+      const avg = recent.reduce((sum, d) => sum + d, 0) / recent.length;
+      const matching = recent.filter(d => Math.abs(d - EXPECTED_LED_HALF_CYCLE_MS) <= 140).length;
+      const matchRatio = matching / recent.length;
+      const avgDev = recent.reduce((sum, d) => sum + Math.abs(d - EXPECTED_LED_HALF_CYCLE_MS), 0) / recent.length;
+
+      if (matchRatio >= 0.65 && avg >= 350 && avg <= 650) {
+        const accuracy = Math.max(0, 1 - (avgDev / 250));
+        let score = Math.round(accuracy * 100);
+        if (recent.length === 3) score = Math.min(score, 78);
+        else score = Math.min(100, Math.max(75, score));
+
+        const confirmed = score >= 70;
+        return { score, status: confirmed ? 'CONFIRMED' : 'ANALYZING', interval: Math.round(avg) };
+      } else {
+        return { score: 0, status: 'WRONG_RATE', interval: Math.round(avg) };
+      }
     }
 
     function sampleTrackedLedState(imageData, now) {
@@ -1153,7 +1198,8 @@
       let match = null;
 
       if (trackedTarget) {
-        const maxDistance = 24;
+        // Generous 50px matching radius to maintain track during 500ms dark phase
+        const maxDistance = 50;
         match = blobs
           .map(blob => ({ blob, distance: Math.hypot(blob.x - trackedTarget.x, blob.y - trackedTarget.y) }))
           .filter(candidate => candidate.distance <= maxDistance)
@@ -1167,10 +1213,12 @@
         if (!trackedTarget) {
           trackedTarget = { x: match.x, y: match.y, minX: match.minX, minY: match.minY, width: match.width, height: match.height };
           transitions = [];
-          lastSampledState = null;
+          lastSampledState = true;
+          lastBlinkState = true;
+          lastTransitionAt = now;
         } else {
-          trackedTarget.x = trackedTarget.x * 0.7 + match.x * 0.3;
-          trackedTarget.y = trackedTarget.y * 0.7 + match.y * 0.3;
+          trackedTarget.x = trackedTarget.x * 0.6 + match.x * 0.4;
+          trackedTarget.y = trackedTarget.y * 0.6 + match.y * 0.4;
           trackedTarget.minX = match.minX;
           trackedTarget.minY = match.minY;
           trackedTarget.width = match.width;
@@ -1179,7 +1227,7 @@
         lastTargetSeenAt = now;
       }
 
-      if (!trackedTarget || now - lastTargetSeenAt > 1800) {
+      if (!trackedTarget || (now - lastTargetSeenAt > 2000)) {
         trackedTarget = null;
         transitions = [];
         lastSampledState = null;
@@ -1187,13 +1235,16 @@
         return { target: null, isOn: false };
       }
 
-      // The blob disappears during an off phase, so sample a small fixed region
-      // around its last location to distinguish on/off while keeping the target locked.
+      if (match) {
+        return { target: trackedTarget, isOn: true };
+      }
+
+      // Check small localized box if LED went off
       const cx = Math.round(trackedTarget.x);
       const cy = Math.round(trackedTarget.y);
       let pinkPixels = 0;
-      for (let y = Math.max(0, cy - 7); y <= Math.min(height - 1, cy + 7); y++) {
-        for (let x = Math.max(0, cx - 7); x <= Math.min(width - 1, cx + 7); x++) {
+      for (let y = Math.max(0, cy - 8); y <= Math.min(height - 1, cy + 8); y++) {
+        for (let x = Math.max(0, cx - 8); x <= Math.min(width - 1, cx + 8); x++) {
           const offset = (y * width + x) * 4;
           if (isIrCandidate(data[offset], data[offset + 1], data[offset + 2])) pinkPixels++;
         }
@@ -1201,28 +1252,65 @@
       return { target: trackedTarget, isOn: pinkPixels >= 2 };
     }
 
-    function drawDetection(target, score) {
+    function drawDetection(target, result) {
       overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
       if (!target) return;
-      const confirmed = score >= 75;
-      overlayContext.strokeStyle = confirmed ? '#ef4444' : '#f59e0b';
-      overlayContext.lineWidth = 2;
-      overlayContext.strokeRect(target.minX - 3, target.minY - 3, target.width + 6, target.height + 6);
-      overlayContext.fillStyle = overlayContext.strokeStyle;
-      overlayContext.font = '12px sans-serif';
-      const label = simulationEnabled
-        ? 'DEMO IR SIGNAL'
-        : (confirmed ? 'CAMERA DETECTED' : 'VERIFYING IR BLINK');
-      overlayContext.fillText(label, target.minX, Math.max(12, target.minY - 7));
+
+      const { score, status, interval } = result;
+      let strokeColor = '#f59e0b';
+      let label = 'VERIFYING IR BLINK...';
+      let lineDash = [];
+
+      if (simulationEnabled) {
+        strokeColor = '#ef4444';
+        label = `DEMO IR SIGNAL (${score}%)`;
+      } else if (status === 'CONFIRMED') {
+        strokeColor = '#ef4444';
+        const rateText = interval > 0 ? ` (~${(interval / 1000).toFixed(2)}s)` : ' (~0.5s)';
+        label = `⚠️ CAMERA DETECTED${rateText}`;
+      } else if (status === 'STATIC') {
+        strokeColor = '#94a3b8';
+        label = 'STATIC PINK OBJECT (IGNORED)';
+        lineDash = [4, 4];
+      } else if (status === 'WRONG_RATE') {
+        strokeColor = '#eab308';
+        label = `IR BLINK: ${(interval / 1000).toFixed(2)}s (NOT 0.5s)`;
+        lineDash = [3, 3];
+      } else {
+        strokeColor = '#3b82f6';
+        label = `ANALYZING BLINK (${score}%)`;
+        lineDash = [2, 2];
+      }
+
+      overlayContext.save();
+      overlayContext.strokeStyle = strokeColor;
+      overlayContext.lineWidth = (status === 'CONFIRMED') ? 3 : 2;
+      overlayContext.setLineDash(lineDash);
+      overlayContext.strokeRect(target.minX - 4, target.minY - 4, target.width + 8, target.height + 8);
+      overlayContext.setLineDash([]);
+
+      overlayContext.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      const textWidth = overlayContext.measureText(label).width;
+      const labelY = Math.max(14, target.minY - 8);
+
+      overlayContext.fillStyle = strokeColor;
+      overlayContext.fillRect(target.minX - 4, labelY - 12, textWidth + 8, 15);
+
+      overlayContext.fillStyle = '#ffffff';
+      overlayContext.fillText(label, target.minX, labelY);
+      overlayContext.restore();
     }
 
     function drawSimulationDot(now) {
-      if (!simulationEnabled || now % 1000 >= 500) return;
+      if (!simulationEnabled) return;
+      // Exact 500ms ON / 500ms OFF blink cycle
+      const isSimOn = Math.floor(now / 500) % 2 === 1;
+      if (!isSimOn) return;
       const x = 160;
       const y = 120;
       processingContext.fillStyle = '#ff00ff';
       processingContext.beginPath();
-      processingContext.arc(x, y, 5, 0, Math.PI * 2);
+      processingContext.arc(x, y, 6, 0, Math.PI * 2);
       processingContext.fill();
     }
 
@@ -1236,8 +1324,6 @@
       let cropWidth = sourceWidth;
       let cropHeight = sourceHeight;
 
-      // Match the preview's object-fit: cover crop so detections and overlay boxes
-      // use the same coordinates on portrait and landscape phone cameras.
       if (sourceAspect > canvasAspect) {
         cropWidth = sourceHeight * canvasAspect;
         sourceX = (sourceWidth - cropWidth) / 2;
@@ -1262,14 +1348,30 @@
       const now = performance.now();
       const sample = sampleTrackedLedState(processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height), now);
       const target = sample.target;
-      const score = target ? updateBlinkAnalysis(sample.isOn, now) : 0;
-      blinkScore.textContent = score + '%';
-      blinkStatus.textContent = simulationEnabled
-        ? '(Demo signal: no real camera detected)'
-        : target
-        ? (score >= 75 ? '(LED blink matches expected rate - camera detected)' : '(IR LED candidate - verifying blink rate)')
-        : '(No optical target detected)';
-      drawDetection(target, score);
+      const result = target ? updateBlinkAnalysis(sample.isOn, now) : { score: 0, status: 'NONE', interval: 0 };
+
+      blinkScore.textContent = result.score + '%';
+      if (simulationEnabled) {
+        blinkStatus.textContent = '(Demo 0.5s IR blink signal simulated)';
+        blinkStatus.style.color = 'var(--accent-blue)';
+      } else if (!target) {
+        blinkStatus.textContent = '(No optical target detected)';
+        blinkStatus.style.color = 'var(--text-muted)';
+      } else if (result.status === 'CONFIRMED') {
+        blinkStatus.textContent = '🚨 0.5s Blink verified (~' + result.interval + 'ms) — Spy Camera Detected!';
+        blinkStatus.style.color = '#ef4444';
+      } else if (result.status === 'STATIC') {
+        blinkStatus.textContent = '❌ Static pink color detected (not blinking at 0.5s) — Threat rejected';
+        blinkStatus.style.color = '#94a3b8';
+      } else if (result.status === 'WRONG_RATE') {
+        blinkStatus.textContent = '⚠️ Blinking at ~' + result.interval + 'ms (expected 500ms / 0.5s)';
+        blinkStatus.style.color = '#eab308';
+      } else {
+        blinkStatus.textContent = '⏳ Optical IR pulse detected — verifying 0.5s blink rate (' + result.score + '% match)...';
+        blinkStatus.style.color = 'var(--accent-blue)';
+      }
+
+      drawDetection(target, result);
       processingFrameId = requestAnimationFrame(processCameraFrame);
     }
 
