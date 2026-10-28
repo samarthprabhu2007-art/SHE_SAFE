@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AEGIS Radar Algorithm Test</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color:#35212b; background:#fff5f8; }
+    body { margin:0; padding:16px; max-width:640px; margin-inline:auto; }
+    h1 { font-size:1.25rem; } .card { background:#fff; border:1px solid #f2c9d8; border-radius:14px; padding:14px; margin:12px 0; }
+    input,button { font:inherit; padding:9px; border-radius:8px; border:1px solid #d8a5b8; } input { width:58%; } button { cursor:pointer; background:#d6336c; color:#fff; font-weight:700; }
+    button:disabled { opacity:.45; cursor:not-allowed; } .row { display:flex; gap:8px; flex-wrap:wrap; } canvas { width:100%; max-width:320px; display:block; margin:auto; }
+    .signal { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid #f6e2e9; font-size:.86rem; }
+    .signal:last-child { border:0; } .signal button { padding:5px 8px; font-size:.75rem; } #status { font-weight:700; color:#a61b4d; } small { color:#80566a; }
+  </style>
+</head>
+<body>
+  <h1>AEGIS · Radar Algorithm Test</h1>
+  <p><small>Standalone test page. It only reads the ESP32 <code>/wifi</code> and <code>/ble</code> APIs.</small></p>
+  <section class="card">
+    <div class="row"><input id="host" value="shesafe.local" aria-label="ESP32 hostname or IP"><button id="connect">Connect</button></div>
+    <p id="connection">Not connected</p>
+    <div class="row"><button id="compass">Enable Compass</button><button id="wall" disabled>Hit Wall</button></div>
+  </section>
+  <section class="card"><canvas id="radar" width="320" height="320"></canvas><p id="heading">Compass disabled</p></section>
+  <section class="card"><div id="status">Select one signal to begin.</div><p id="detail"><small>Turn slowly and pause in each of the eight sectors.</small></p></section>
+  <section class="card"><h2>Wi-Fi</h2><div id="wifi">Connect to scan.</div><h2>Bluetooth</h2><div id="ble">Connect to scan.</div></section>
+  <script>
+    const state = { base:'', timer:null, heading:null, target:null, last:null, blocked:new Set(), samples:Array.from({length:8},()=>[]) };
+    const $ = id => document.getElementById(id);
+    const average = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+    const sector = () => state.heading === null ? null : Math.floor(((state.heading + 22.5) % 360) / 45);
+    const best = () => state.samples.map((v,i)=>({i,v:average(v)})).filter(x=>x.v!==null&&!state.blocked.has(x.i)).sort((a,b)=>b.v-a.v)[0];
+    function turn(bestSector) { const here=sector(); if (!bestSector || here===null) return 'Build readings in every direction.'; const d=(bestSector.i-here+8)%8; return d===0?'Face this way and move forward.':d===4?'Best signal is behind you: backtrack.':d<=4?`Turn right ${d*45}°.`:`Turn left ${(8-d)*45}°.`; }
+    function prediction() { const all=state.samples.flat(), top=best(); if(all.length<12||!top)return 'Need more samples for room prediction.'; const spread=Math.max(...all)-Math.min(...all); return top.v < -78 && spread < 9 ? 'Likely outside the room or behind a thick wall.' : top.v >= -65 && spread >= 8 ? 'Likely inside this room.' : 'Room location is still uncertain.'; }
+    function draw() { const c=$('radar'),x=c.getContext('2d'),m=160,r=145; x.clearRect(0,0,320,320); x.fillStyle='#fff0f5';x.beginPath();x.arc(m,m,r,0,7);x.fill(); for(let i=0;i<8;i++){let a=i*Math.PI/4-Math.PI/2, v=average(state.samples[i]), blocked=state.blocked.has(i);x.beginPath();x.moveTo(m,m);x.arc(m,m,r,a-Math.PI/8,a+Math.PI/8);x.closePath();x.fillStyle=blocked?'rgba(225,29,72,.3)':v===null?'rgba(214,51,108,.04)':`rgba(9,137,104,${Math.max(.1,Math.min(.65,(v+100)/70))})`;x.fill();x.strokeStyle='#e6b8c8';x.stroke();} x.fillStyle='#d6336c';x.beginPath();x.arc(m,m,9,0,7);x.fill(); const top=best();if(top){let a=top.i*Math.PI/4-Math.PI/2;x.strokeStyle='#098968';x.lineWidth=5;x.beginPath();x.moveTo(m,m);x.lineTo(m+105*Math.cos(a),m+105*Math.sin(a));x.stroke();} }
+    function showSignals(id, signals, type) { const box=$(id); box.innerHTML=''; if(!signals.length){box.textContent='None found.';return;} signals.sort((a,b)=>b.rssi-a.rssi).forEach(s=>{const stable=type==='wifi'?s.bssid:(s.address||s.name), label=type==='wifi'?(s.ssid||'(Hidden)'):s.name, line=document.createElement('div');line.className='signal';const text=document.createElement('span');text.textContent=`${label} · ${s.rssi} dBm · ${stable}`;const button=document.createElement('button');button.textContent=state.target?.id===stable&&state.target.type===type?'Tracking':'Track';button.onclick=()=>{state.target={id:stable,type,label};state.last=null;state.blocked.clear();state.samples.forEach(a=>a.splice(0));$('wall').disabled=false;showSignals('wifi',window.wifi||[],'wifi');showSignals('ble',window.ble||[],'ble');};line.append(text,button);box.append(line);}); }
+    function process() { if(!state.target)return; const data=state.target.type==='wifi'?window.wifi:window.ble; const s=data.find(v=>(state.target.type==='wifi'?v.bssid:(v.address||v.name))===state.target.id);if(!s){$('status').textContent='TARGET LOST';return;} const i=sector();if(i!==null){state.samples[i].push(s.rssi);if(state.samples[i].length>10)state.samples[i].shift();} const trend=state.last===null?'Sampling':s.rssi-state.last>=2?'Warmer':state.last-s.rssi>=2?'Colder':'Steady';state.last=s.rssi;const top=best();$('status').textContent=`${trend}: ${s.rssi} dBm`; $('detail').textContent=`${turn(top)} ${prediction()}`;draw(); }
+    async function scan(){try{const [w,b]=await Promise.all([fetch(state.base+'/wifi'),fetch(state.base+'/ble')]);window.wifi=await w.json();window.ble=await b.json();showSignals('wifi',window.wifi,'wifi');showSignals('ble',window.ble,'ble');process();}catch(e){$('connection').textContent='Scan failed — check ESP32 connection.';}}
+    $('connect').onclick=async()=>{const host=$('host').value.trim();state.base=host.startsWith('http')?host:'http://'+host;await scan();$('connection').textContent='Connected: '+state.base;clearInterval(state.timer);state.timer=setInterval(scan,3000);};
+    $('compass').onclick=async()=>{try{if(typeof DeviceOrientationEvent.requestPermission==='function'&&await DeviceOrientationEvent.requestPermission()!=='granted')throw Error();addEventListener('deviceorientation',e=>{const h=Number.isFinite(e.webkitCompassHeading)?e.webkitCompassHeading:e.alpha;if(Number.isFinite(h)){state.heading=(h+360)%360;$('heading').textContent=`Heading ${Math.round(h)}° · sector ${sector()+1}/8`;draw();}},true);$('compass').disabled=true;$('compass').textContent='Compass enabled';}catch(e){$('heading').textContent='Compass permission denied.';}};
+    $('wall').onclick=()=>{const i=sector();if(i===null){$('status').textContent='Compass is required before marking a wall.';return;}state.blocked.add(i);$('detail').textContent='Wall excluded. '+turn(best());draw();}; draw();
+  </script>
+</body>
+</html>
