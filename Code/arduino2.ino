@@ -3,6 +3,8 @@
 #include <NimBLEDevice.h>
 #include <ESPmDNS.h>
 
+// ─── Network Configuration ──────────────────────────────────────────────────
+// Enter your phone's Mobile Hotspot or local Wi-Fi credentials:
 const char* ssid = "hello";         // Your Mobile Hotspot SSID
 const char* password = "12345678";  // Your Mobile Hotspot Password
 
@@ -13,7 +15,13 @@ String bleJson = "[]";
 
 SemaphoreHandle_t jsonMutex;
 
-// Background task to scan Wi-Fi and BLE continuously
+// ─── IR LED Blink Configuration (500ms ON / 500ms OFF) ──────────────────────
+const int IR_LED_PIN = 14;          // GPIO pin wired to the IR LED
+unsigned long lastBlinkTime = 0;
+bool ledState = false;
+const unsigned long blinkInterval = 500; // 500ms ON / 500ms OFF (1.0 Hz)
+
+// ─── Background Wi-Fi & BLE Scanner Task (Runs on Core 0) ───────────────────
 void scanTask(void* parameter) {
   for (;;) {
     // 1. Wi-Fi scan
@@ -54,7 +62,7 @@ void scanTask(void* parameter) {
     tempBle += "]";
     scan->clearResults(); 
 
-    // Update shared strings safely using mutex
+    // Update shared JSON strings safely using mutex
     if (xSemaphoreTake(jsonMutex, portMAX_DELAY) == pdTRUE) {
       wifiJson = tempWifi;
       bleJson = tempBle;
@@ -66,7 +74,7 @@ void scanTask(void* parameter) {
   }
 }
 
-// Handler for /wifi endpoint
+// ─── HTTP API Handlers ──────────────────────────────────────────────────────
 void handleWifi() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   String response;
@@ -79,7 +87,6 @@ void handleWifi() {
   server.send(200, "application/json", response);
 }
 
-// Handler for /ble endpoint
 void handleBLE() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   String response;
@@ -100,12 +107,17 @@ void handleOptions() {
   server.send(204);
 }
 
+// ─── Setup ──────────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
   
+  // Setup IR LED pin
+  pinMode(IR_LED_PIN, OUTPUT);
+  digitalWrite(IR_LED_PIN, LOW);
+
   jsonMutex = xSemaphoreCreateMutex();
   
-  // Set ESP32 to Station Mode (Connects to your phone's hotspot)
+  // Connect ESP32 to phone hotspot / Wi-Fi
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   
@@ -123,11 +135,11 @@ void setup() {
   Serial.print("ESP32 IP Address: ");
   Serial.println(WiFi.localIP()); 
 
-  // Initialize mDNS
+  // Initialize mDNS (http://shesafe.local)
   if (!MDNS.begin("shesafe")) {
     Serial.println("Error setting up MDNS responder!");
   } else {
-    Serial.println("mDNS responder started. You can connect to: http://shesafe.local");
+    Serial.println("mDNS responder started: http://shesafe.local");
     MDNS.addService("http", "tcp", 80);
   }
 
@@ -138,7 +150,7 @@ void setup() {
   server.on("/wifi", HTTP_GET, handleWifi);
   server.on("/ble", HTTP_GET, handleBLE);
   
-  // Respond to preflight requests globally
+  // Respond to preflight CORS requests globally
   server.onNotFound([]() {
     if (server.method() == HTTP_OPTIONS) {
       handleOptions();
@@ -148,9 +160,9 @@ void setup() {
   });
 
   server.begin();
-  Serial.println("Web Server running.");
+  Serial.println("Web Server running on port 80.");
 
-  // Start the Wi-Fi/BLE scanning background task on Core 0
+  // Start the background Wi-Fi/BLE scanning task on Core 0
   xTaskCreatePinnedToCore(
     scanTask,      // Task function
     "ScanTask",    // Task name
@@ -158,12 +170,19 @@ void setup() {
     NULL,          // Parameter
     1,             // Priority
     NULL,          // Task handle
-    0              // Core to run on (0 or 1)
+    0              // Core to run on (0)
   );
 }
 
+// ─── Main Loop ──────────────────────────────────────────────────────────────
 void loop() {
-  // Keep the web server responsive
+  // Keep the HTTP API server responsive
   server.handleClient();
-}
 
+  // Non-blocking 500ms ON / 500ms OFF IR LED blink for camera optical detection
+  if (millis() - lastBlinkTime >= blinkInterval) {
+    lastBlinkTime = millis();
+    ledState = !ledState;
+    digitalWrite(IR_LED_PIN, ledState ? HIGH : LOW);
+  }
+}
