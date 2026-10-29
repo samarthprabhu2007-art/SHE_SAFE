@@ -971,7 +971,7 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
           </div>
         </div>
         <div class="esp-connect-bar">
-          <input class="esp-ip-input" type="text" id="espIpInput" value="shesafe.local" placeholder="e.g. shesafe.local" autocomplete="off" spellcheck="false">
+          <input class="esp-ip-input" type="text" id="espIpInput" value="192.168.4.1" placeholder="ESP32 IP (default: 192.168.4.1)" autocomplete="off" spellcheck="false">
           <button class="btn-connect" id="btnConnect">Connect</button>
         </div>
         <div class="esp-connected-ip" id="connectedIpDisplay">
@@ -2176,6 +2176,7 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
     let espBaseUrl      = '';
     let isConnected     = false;
     let scanInterval    = null;
+    let scanInFlight    = false;
     let lastWifiData    = [];
     let lastBleData     = [];
     let radarAngle      = 0;
@@ -2431,6 +2432,7 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
       if (delta > 3) {
         sd.momentum = 1;
         targetVectorAngle = sec * 45;
+        targetVectorLabel.textContent = `Sec ${sec} (${SECTOR_NAMES[sec]}) ~${Math.round(targetVectorAngle)}°`;
         updateDirectionalGuidance();
         updateRoomPrediction();
         return;
@@ -2929,21 +2931,44 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
     }
 
     // ── Fetch from ESP32 ──────────────────────────────────────────────────────
-    async function fetchSignals() {
-      if (!isConnected || !espBaseUrl) return;
+    async function fetchSignalArray(url) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      let response;
       try {
-        const [wRes, bRes] = await Promise.all([
-          fetch(`${espBaseUrl}/wifi`, { signal: AbortSignal.timeout(4000) }),
-          fetch(`${espBaseUrl}/ble`,  { signal: AbortSignal.timeout(4000) })
+        response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error(`${url} did not return a JSON array`);
+      return data;
+    }
+
+    function scanFailureHelp(error) {
+      if (error && error.name === 'AbortError') {
+        return 'ESP32 timed out. Check that the phone is connected to the same network and that the address is the ESP32 address.';
+      }
+      if (window.location.protocol === 'https:') {
+        return 'HTTPS pages cannot read the ESP32 HTTP API. Join AEGIS-ESP32 and open http://192.168.4.1, or open the dashboard from the ESP32 HTTP address.';
+      }
+      return 'Join AEGIS-ESP32 and use http://192.168.4.1, or enter the ESP32 hotspot-network IP shown in Serial Monitor. The phone and ESP32 must be on the same network.';
+    }
+
+    async function fetchSignals() {
+      if (!isConnected || !espBaseUrl || scanInFlight) return;
+      scanInFlight = true;
+      try {
+        const [wifi, ble] = await Promise.all([
+          fetchSignalArray(`${espBaseUrl}/wifi`),
+          fetchSignalArray(`${espBaseUrl}/ble`)
         ]);
-        const wifi = await wRes.json();
-        const ble  = await bRes.json();
 
         lastWifiData = wifi;
-        lastBleData  = ble;
-
+        lastBleData = ble;
         wifiCount.textContent = wifi.length;
-        bleCount.textContent  = ble.length;
+        bleCount.textContent = ble.length;
         totalSignalCount.textContent = `${wifi.length + ble.length} signals`;
 
         renderWifiList(wifi);
@@ -2951,15 +2976,19 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
         updateGuidance(wifi, ble);
 
         const total = wifi.length + ble.length;
-        refreshLabel.textContent = `Updated · ${wifi.length}W ${ble.length}BT`;
+        refreshLabel.textContent = `Updated - ${wifi.length} Wi-Fi, ${ble.length} BLE`;
         radarStatusText.textContent = `${total} signal${total !== 1 ? 's' : ''}`;
         radarStatusBadge.querySelector('.status-dot').style.backgroundColor = 'var(--accent-green)';
         pulseRefresh(true);
-        logMessage(`📡 Scan: ${wifi.length} Wi-Fi, ${ble.length} BLE devices found.`);
+        logMessage(`Scan refreshed: ${wifi.length} Wi-Fi, ${ble.length} BLE devices.`);
       } catch (err) {
         pulseRefresh(false);
         refreshLabel.textContent = 'Scan failed';
-        logMessage('⚠️ ESP32 scan failed. Check connection.');
+        const detail = `${err && err.message ? err.message : 'Request failed'}. ${scanFailureHelp(err)}`;
+        guidanceSub.textContent = detail;
+        logMessage(`Scan error: ${detail}`);
+      } finally {
+        scanInFlight = false;
       }
     }
 
@@ -2993,14 +3022,16 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
       const ip = espIpInput.value.trim();
       if (!ip) { logMessage('⚠️ Enter an IP address first.'); return; }
 
-      const url = ip.startsWith('http') ? ip : `http://${ip}`;
+      const url = (ip.startsWith('http') ? ip : `http://${ip}`).replace(/\/+$/, '');
       btnConnect.textContent = '⏳ Connecting...';
       btnConnect.disabled    = true;
       logMessage(`Connecting to ESP32 at ${url}…`);
 
       try {
-        const res = await fetch(`${url}/wifi`, { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) throw new Error('Bad response');
+        await Promise.all([
+          fetchSignalArray(`${url}/wifi`),
+          fetchSignalArray(`${url}/ble`)
+        ]);
 
         isConnected = true;
         espBaseUrl  = url;
@@ -3009,18 +3040,19 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
         connectedIpText.textContent = `Connected to ${ip}`;
         connectedIpDisplay.classList.add('visible');
         refreshLabel.textContent = 'Connected';
-        logMessage(`✅ Connected to ESP32 at ${ip}. Auto-scanning every 3s.`);
+        logMessage(`✅ Connected to ESP32 at ${ip}. Wi-Fi and BLE readings refresh every 5s.`);
 
         // Immediate scan
         await fetchSignals();
-        // Schedule every 3 seconds
-        scanInterval = setInterval(fetchSignals, 3000);
+        // Schedule every 5 seconds
+        scanInterval = setInterval(fetchSignals, 5000);
       } catch (err) {
         if (window.location.protocol === 'https:' && url.startsWith('http:')) {
-          alert("⚠️ BROWSER SECURITY BLOCK ⚠️\n\nYour browser is blocking the connection to the ESP32 because Vercel uses HTTPS and the ESP32 uses HTTP.\n\nTo fix this:\n1. Tap the Lock/Settings icon in your URL address bar.\n2. Go to Site Settings / Permissions.\n3. Find 'Insecure Content' (or Mixed Content) and change it to ALLOW.\n4. Reload the page.");
+          alert("HTTPS pages cannot connect to the ESP32 HTTP API. Join AEGIS-ESP32 and open http://192.168.4.1 directly.");
         }
         logMessage(`❌ Could not reach ESP32 at ${url}. Is the device on?`);
         btnConnect.textContent = 'Connect';
+        logMessage('Connection tip: join AEGIS-ESP32 and use http://192.168.4.1, or enter the ESP32 IP shown in Serial Monitor.');
         refreshDot.style.backgroundColor = '#e11d48';
       } finally {
         btnConnect.disabled = false;
@@ -3068,6 +3100,8 @@ static const char SHE_SAFE_PAGE[] PROGMEM = R"SHESAFE_PAGE(
 // ============================================================================
 const char* ssid = "hello";         // Your Mobile Hotspot SSID
 const char* password = "12345678";  // Your Mobile Hotspot Password
+const char* DEVICE_AP_SSID = "AEGIS-ESP32";
+const char* DEVICE_AP_PASSWORD = "12345678";
 
 WebServer server(80);
 
@@ -3112,7 +3146,27 @@ void startMdnsWhenConnected() {
 // ============================================================================
 // Background Wi-Fi & BLE Scanner Task (Runs in background)
 // ============================================================================
+String jsonEscape(const String& input) {
+  String output;
+  const char* hex = "0123456789abcdef";
+  for (size_t i = 0; i < input.length(); i++) {
+    const uint8_t c = static_cast<uint8_t>(input[i]);
+    if (c == '"' || c == '\\') output += '\\';
+    if (c == '\n') output += "\\n";
+    else if (c == '\r') output += "\\r";
+    else if (c == '\t') output += "\\t";
+    else if (c < 0x20) {
+      output += "\\u00";
+      output += hex[(c >> 4) & 0x0f];
+      output += hex[c & 0x0f];
+    } else output += static_cast<char>(c);
+  }
+  return output;
+}
+
 void scanTask(void* parameter) {
+  TickType_t nextScanWake = xTaskGetTickCount();
+  const TickType_t scanPeriod = pdMS_TO_TICKS(5000);
   for (;;) {
     // 1. Wi-Fi scan
     int n = WiFi.scanNetworks(false, true); 
@@ -3122,7 +3176,7 @@ void scanTask(void* parameter) {
       int ch = WiFi.channel(i);
       int freq = 2407 + ch * 5;
       tempWifi += "{";
-      tempWifi += "\"ssid\":\"" + WiFi.SSID(i) + "\",";
+      tempWifi += "\"ssid\":\"" + jsonEscape(WiFi.SSID(i)) + "\",";
       tempWifi += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
       tempWifi += "\"channel\":" + String(ch) + ",";
       tempWifi += "\"freq\":" + String(freq) + ",";
@@ -3139,7 +3193,7 @@ void scanTask(void* parameter) {
     scan->setWindow(99);
     
     // Scan for 2 seconds
-    BLEScanResults* results = scan->start(2, false); 
+    BLEScanResults* results = scan->start(2, false);
     String tempBle = "[";
     if (results != nullptr) {
       int count = results->getCount();
@@ -3149,11 +3203,11 @@ void scanTask(void* parameter) {
         String name = dev.getName();
         if (name.length() == 0) name = dev.getAddress().toString();
         tempBle += "{";
-        tempBle += "\"name\":\"" + name + "\",";
+        tempBle += "\"name\":\"" + jsonEscape(name) + "\",";
         tempBle += "\"rssi\":" + String(dev.getRSSI());
         tempBle += "}";
       }
-      scan->clearResults(); 
+      scan->clearResults();
     }
     tempBle += "]";
 
@@ -3164,8 +3218,8 @@ void scanTask(void* parameter) {
       xSemaphoreGive(jsonMutex);
     }
 
-    // Delay before next scan cycle to prevent CPU hogging
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // Keep fresh Wi-Fi/BLE snapshots on a 5-second cadence.
+    vTaskDelayUntil(&nextScanWake, scanPeriod);
   }
 }
 
@@ -3174,6 +3228,7 @@ void scanTask(void* parameter) {
 // ============================================================================
 void handleWifi() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   String response;
   if (xSemaphoreTake(jsonMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
     response = wifiJson;
@@ -3186,6 +3241,7 @@ void handleWifi() {
 
 void handleBLE() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   String response;
   if (xSemaphoreTake(jsonMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
     response = bleJson;
@@ -3220,26 +3276,19 @@ void setup() {
   jsonMutex = xSemaphoreCreateMutex();
   
   // Try Wi-Fi for up to 15 seconds.
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_AP_STA);
+  if (WiFi.softAP(DEVICE_AP_SSID, DEVICE_AP_PASSWORD)) {
+    Serial.print("Device access point: ");
+    Serial.println(DEVICE_AP_SSID);
+    Serial.print("Open dashboard at http://");
+    Serial.println(WiFi.softAPIP());
+  } else {
+    Serial.println("Could not start device access point.");
+  }
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, password);
-  
-  Serial.println();
-  Serial.print("Connecting to Mobile Hotspot: ");
+  Serial.print("Connecting to phone hotspot in background: ");
   Serial.println(ssid);
-  
-  const unsigned long wifiStartTime = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - wifiStartTime < 15000) {
-    delay(10);
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("Connected to Hotspot!");
-    Serial.print("ESP32 IP Address: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("Wi-Fi timeout after 15 seconds; continuing offline. LED and BLE scan remain active.");
-  }
 
   // Initialize mDNS (http://shesafe.local)
   startMdnsWhenConnected();
@@ -3284,5 +3333,15 @@ void setup() {
 void loop() {
   // Keep the HTTP API server responsive
   server.handleClient();
+  static bool stationWasConnected = false;
+  const bool stationConnected = WiFi.status() == WL_CONNECTED;
+  if (stationConnected && !stationWasConnected) {
+    Serial.println("Connected to phone hotspot.");
+    Serial.print("Hotspot network ESP32 IP: ");
+    Serial.println(WiFi.localIP());
+    stationWasConnected = true;
+  } else if (!stationConnected) {
+    stationWasConnected = false;
+  }
   startMdnsWhenConnected();
 }
