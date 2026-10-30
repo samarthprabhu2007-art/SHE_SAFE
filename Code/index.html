@@ -963,7 +963,7 @@
           </div>
         </div>
         <div class="esp-connect-bar">
-          <input class="esp-ip-input" type="text" id="espIpInput" value="shesafe.local" placeholder="e.g. shesafe.local" autocomplete="off" spellcheck="false">
+          <input class="esp-ip-input" type="text" id="espIpInput" value="192.168.4.1" placeholder="ESP32 IP (default: 192.168.4.1)" autocomplete="off" spellcheck="false">
           <button class="btn-connect" id="btnConnect">Connect</button>
         </div>
         <div class="esp-connected-ip" id="connectedIpDisplay">
@@ -996,6 +996,7 @@
             ⚡ Demo Target
           </button>
         </div>
+        <div id="gyroStatus" role="status" aria-live="polite" style="margin-top:8px;font-size:0.82rem;color:var(--text-muted);">Gyro status: Not checked</div>
 
         <!-- Target Lock-on Banner (active when user locks a Wi-Fi or BLE node) -->
         <div class="target-lock-banner" id="targetLockBanner">
@@ -2135,6 +2136,7 @@
     const radarWrap         = document.getElementById('radarWrap');
     const btnLinkGyro       = document.getElementById('btnLinkGyro');
     const gyroBtnText       = document.getElementById('gyroBtnText');
+    const gyroStatusText    = document.getElementById('gyroStatus');
     const btnHitWall        = document.getElementById('btnHitWall');
     const btnSimTarget      = document.getElementById('btnSimTarget');
     const targetLockBanner  = document.getElementById('targetLockBanner');
@@ -2166,6 +2168,7 @@
     let espBaseUrl      = '';
     let isConnected     = false;
     let scanInterval    = null;
+    let scanInFlight    = false;
     let lastWifiData    = [];
     let lastBleData     = [];
     let radarAngle      = 0;
@@ -2174,6 +2177,8 @@
 
     // ─── Issue 3: Sensor & 8-Sector Gradient-Ascent State ──────────────────
     let gyroLinked        = false;
+    let gyroListenerAttached = false;
+    let gyroCheckTimer = null;
     let relativeHeading   = 0;          // 0 to 360 deg
     let baselineAlpha     = null;
     let currentAlpha      = 0;
@@ -2224,14 +2229,45 @@
 
     // ─── Task 1: Gyroscope & Compass Integration ───────────────────────────
     function initSensors() {
-      function attachListener() {
-        gyroLinked = true;
-        btnLinkGyro.classList.add('linked');
+      function setGyroStatus(message, connected = false) {
+        gyroStatusText.textContent = `Gyro status: ${message}`;
+        gyroStatusText.style.color = connected ? 'var(--accent-green)' : '#b45309';
+      }
+
+      if (!window.isSecureContext) {
+        setGyroStatus('Blocked: this page is not a secure context. Open it over HTTPS or enable the Chrome flag for this exact ESP32 address.');
+        gyroBtnText.textContent = 'Gyro Blocked';
+        btnLinkGyro.classList.remove('linked');
+        logMessage('Gyroscope unavailable: browser blocks orientation sensors on this HTTP page.');
+        return;
+      }
+
+      if (typeof DeviceOrientationEvent === 'undefined') {
+        setGyroStatus('Unsupported: this browser does not expose device orientation.');
+        gyroBtnText.textContent = 'Gyro Unsupported';
+        logMessage('This browser does not support device orientation.');
+        return;
+      }
+
+      gyroLinked = false;
+      baselineAlpha = null;
+      btnLinkGyro.classList.remove('linked');
+      gyroBtnText.textContent = 'Waiting for gyro…';
+      setGyroStatus('Waiting for permission and sensor data…');
+
+      if (!gyroListenerAttached) {
         window.addEventListener('deviceorientation', function(event) {
           const raw = (event.webkitCompassHeading != null)
             ? (360 - event.webkitCompassHeading)
             : event.alpha;
-          if (raw === null || raw === undefined) return;
+          if (raw === null || raw === undefined) {
+            if (!gyroLinked) setGyroStatus('Event received, but no heading value is available.');
+            return;
+          }
+
+          gyroLinked = true;
+          clearTimeout(gyroCheckTimer);
+          btnLinkGyro.classList.add('linked');
           currentAlpha = raw;
           if (baselineAlpha === null) baselineAlpha = currentAlpha;
           let delta = currentAlpha - baselineAlpha;
@@ -2241,28 +2277,44 @@
 
           const sec = getCurrentSector(relativeHeading);
           currentSectorLabel.textContent = `Sec ${sec} (${SECTOR_NAMES[sec]}) | ${Math.round(relativeHeading)}°`;
-          gyroBtnText.textContent = `Gyro Linked (${Math.round(relativeHeading)}°)`;
+          gyroBtnText.textContent = `Gyro OK (${Math.round(relativeHeading)}°)`;
+          setGyroStatus(`Connected — live heading data received (${Math.round(relativeHeading)}°).`, true);
 
           if (lockedTarget) updateDirectionalGuidance();
         }, true);
-
-        logMessage('Gyroscope / Compass linked successfully.');
+        gyroListenerAttached = true;
       }
+
+      clearTimeout(gyroCheckTimer);
+      gyroCheckTimer = setTimeout(() => {
+        if (!gyroLinked) {
+          setGyroStatus('No sensor data received. Check Chrome sensor permission, the secure-context flag, and that the phone has orientation sensors.');
+          gyroBtnText.textContent = 'Gyro Not Detected';
+          btnLinkGyro.classList.remove('linked');
+          logMessage('Gyroscope check timed out: no deviceorientation data arrived.');
+        }
+      }, 5000);
 
       if (typeof DeviceOrientationEvent !== 'undefined' &&
           typeof DeviceOrientationEvent.requestPermission === 'function') {
         DeviceOrientationEvent.requestPermission()
-          .then(state => {
-            if (state === 'granted') attachListener();
-            else logMessage('Gyroscope permission was denied.');
+          .then(permission => {
+            if (permission === 'granted') logMessage('Gyroscope permission granted; waiting for sensor data.');
+            else {
+              clearTimeout(gyroCheckTimer);
+              setGyroStatus('Permission denied. Allow motion/orientation access in browser settings.');
+              gyroBtnText.textContent = 'Gyro Permission Denied';
+              logMessage('Gyroscope permission was denied.');
+            }
           })
           .catch(err => {
+            clearTimeout(gyroCheckTimer);
             console.error(err);
+            setGyroStatus(`Permission error: ${err.message || 'request failed'}.`);
+            gyroBtnText.textContent = 'Gyro Error';
             logMessage('Error requesting Gyroscope permission.');
           });
-      } else {
-        attachListener();
-      }
+      } else logMessage('Waiting for device orientation data.');
     }
 
     btnLinkGyro.addEventListener('click', initSensors);
@@ -2372,6 +2424,7 @@
       if (delta > 3) {
         sd.momentum = 1;
         targetVectorAngle = sec * 45;
+        targetVectorLabel.textContent = `Sec ${sec} (${SECTOR_NAMES[sec]}) ~${Math.round(targetVectorAngle)}°`;
         updateDirectionalGuidance();
         updateRoomPrediction();
         return;
@@ -2870,21 +2923,44 @@
     }
 
     // ── Fetch from ESP32 ──────────────────────────────────────────────────────
-    async function fetchSignals() {
-      if (!isConnected || !espBaseUrl) return;
+    async function fetchSignalArray(url) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      let response;
       try {
-        const [wRes, bRes] = await Promise.all([
-          fetch(`${espBaseUrl}/wifi`, { signal: AbortSignal.timeout(4000) }),
-          fetch(`${espBaseUrl}/ble`,  { signal: AbortSignal.timeout(4000) })
+        response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error(`${url} did not return a JSON array`);
+      return data;
+    }
+
+    function scanFailureHelp(error) {
+      if (error && error.name === 'AbortError') {
+        return 'ESP32 timed out. Check that the phone is connected to the same network and that the address is the ESP32 address.';
+      }
+      if (window.location.protocol === 'https:') {
+        return 'HTTPS pages cannot read the ESP32 HTTP API. Join AEGIS-ESP32 and open http://192.168.4.1, or open the dashboard from the ESP32 HTTP address.';
+      }
+      return 'Join AEGIS-ESP32 and use http://192.168.4.1, or enter the ESP32 hotspot-network IP shown in Serial Monitor. The phone and ESP32 must be on the same network.';
+    }
+
+    async function fetchSignals() {
+      if (!isConnected || !espBaseUrl || scanInFlight) return;
+      scanInFlight = true;
+      try {
+        const [wifi, ble] = await Promise.all([
+          fetchSignalArray(`${espBaseUrl}/wifi`),
+          fetchSignalArray(`${espBaseUrl}/ble`)
         ]);
-        const wifi = await wRes.json();
-        const ble  = await bRes.json();
 
         lastWifiData = wifi;
-        lastBleData  = ble;
-
+        lastBleData = ble;
         wifiCount.textContent = wifi.length;
-        bleCount.textContent  = ble.length;
+        bleCount.textContent = ble.length;
         totalSignalCount.textContent = `${wifi.length + ble.length} signals`;
 
         renderWifiList(wifi);
@@ -2892,15 +2968,19 @@
         updateGuidance(wifi, ble);
 
         const total = wifi.length + ble.length;
-        refreshLabel.textContent = `Updated · ${wifi.length}W ${ble.length}BT`;
+        refreshLabel.textContent = `Updated - ${wifi.length} Wi-Fi, ${ble.length} BLE`;
         radarStatusText.textContent = `${total} signal${total !== 1 ? 's' : ''}`;
         radarStatusBadge.querySelector('.status-dot').style.backgroundColor = 'var(--accent-green)';
         pulseRefresh(true);
-        logMessage(`📡 Scan: ${wifi.length} Wi-Fi, ${ble.length} BLE devices found.`);
+        logMessage(`Scan refreshed: ${wifi.length} Wi-Fi, ${ble.length} BLE devices.`);
       } catch (err) {
         pulseRefresh(false);
         refreshLabel.textContent = 'Scan failed';
-        logMessage('⚠️ ESP32 scan failed. Check connection.');
+        const detail = `${err && err.message ? err.message : 'Request failed'}. ${scanFailureHelp(err)}`;
+        guidanceSub.textContent = detail;
+        logMessage(`Scan error: ${detail}`);
+      } finally {
+        scanInFlight = false;
       }
     }
 
@@ -2934,14 +3014,16 @@
       const ip = espIpInput.value.trim();
       if (!ip) { logMessage('⚠️ Enter an IP address first.'); return; }
 
-      const url = ip.startsWith('http') ? ip : `http://${ip}`;
+      const url = (ip.startsWith('http') ? ip : `http://${ip}`).replace(/\/+$/, '');
       btnConnect.textContent = '⏳ Connecting...';
       btnConnect.disabled    = true;
       logMessage(`Connecting to ESP32 at ${url}…`);
 
       try {
-        const res = await fetch(`${url}/wifi`, { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) throw new Error('Bad response');
+        await Promise.all([
+          fetchSignalArray(`${url}/wifi`),
+          fetchSignalArray(`${url}/ble`)
+        ]);
 
         isConnected = true;
         espBaseUrl  = url;
@@ -2950,18 +3032,19 @@
         connectedIpText.textContent = `Connected to ${ip}`;
         connectedIpDisplay.classList.add('visible');
         refreshLabel.textContent = 'Connected';
-        logMessage(`✅ Connected to ESP32 at ${ip}. Auto-scanning every 3s.`);
+        logMessage(`✅ Connected to ESP32 at ${ip}. Wi-Fi and BLE readings refresh every 5s.`);
 
         // Immediate scan
         await fetchSignals();
-        // Schedule every 3 seconds
-        scanInterval = setInterval(fetchSignals, 3000);
+        // Schedule every 5 seconds
+        scanInterval = setInterval(fetchSignals, 5000);
       } catch (err) {
         if (window.location.protocol === 'https:' && url.startsWith('http:')) {
-          alert("⚠️ BROWSER SECURITY BLOCK ⚠️\n\nYour browser is blocking the connection to the ESP32 because Vercel uses HTTPS and the ESP32 uses HTTP.\n\nTo fix this:\n1. Tap the Lock/Settings icon in your URL address bar.\n2. Go to Site Settings / Permissions.\n3. Find 'Insecure Content' (or Mixed Content) and change it to ALLOW.\n4. Reload the page.");
+          alert("HTTPS pages cannot connect to the ESP32 HTTP API. Join AEGIS-ESP32 and open http://192.168.4.1 directly.");
         }
         logMessage(`❌ Could not reach ESP32 at ${url}. Is the device on?`);
         btnConnect.textContent = 'Connect';
+        logMessage('Connection tip: join AEGIS-ESP32 and use http://192.168.4.1, or enter the ESP32 IP shown in Serial Monitor.');
         refreshDot.style.backgroundColor = '#e11d48';
       } finally {
         btnConnect.disabled = false;
@@ -2981,6 +3064,15 @@
         logMessage('⚠️ file:// detected — serve over HTTP for mic & location to work fully.');
       } else {
         logMessage('SYS: App initialized. Mode: Wireless Radar.');
+      }
+
+      // When served by the ESP32 itself, its API shares this HTTP origin.
+      // This avoids the HTTPS-to-HTTP mixed-content block and the manual IP field.
+      const isDeviceHost = window.location.protocol === 'http:' &&
+        (window.location.hostname.endsWith('.local') || /^\d{1,3}(\.\d{1,3}){3}$/.test(window.location.hostname));
+      if (isDeviceHost) {
+        espIpInput.value = window.location.origin;
+        btnConnect.click();
       }
 
       // Start radar animation
