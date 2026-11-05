@@ -1,4 +1,5 @@
 // AEGIS - Hidden Camera Detector (ESP32)
+// Submitted for Phase 2
 // Wireless Radar now works step by step: walk N steps, tap Read, app averages 2 fresh
 // readings, compares with the previous point and updates sector scores.
 // SOS, IR LED, code word, wired camera detector, routes, and unrelated firmware are preserved.
