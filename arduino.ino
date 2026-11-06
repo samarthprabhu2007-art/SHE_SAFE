@@ -315,6 +315,41 @@ const char index_html[] PROGMEM = R"rawliteral(
       70% { box-shadow: 0 0 0 6px rgba(9,137,104,0); }
       100% { box-shadow: 0 0 0 0 rgba(9,137,104,0); } }
 
+    
+    /* Signal Strength RSSI Threshold Slider */
+    .rssi-filter-wrap { margin-bottom: 10px; padding: 10px 12px; background: #fff7fa;
+      border: 1px solid var(--border-color); border-radius: 12px; }
+    .rssi-filter-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .rssi-filter-label { font-size: .78rem; font-weight: 700; color: var(--text-main); }
+    .rssi-filter-val { font-size: .75rem; font-weight: 800; color: var(--accent-blue); }
+    .rssi-slider { width: 100%; -webkit-appearance: none; height: 6px; border-radius: 3px;
+      background: #f2c9d8; outline: none; }
+    .rssi-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px;
+      border-radius: 50%; background: var(--accent-blue); cursor: pointer;
+      box-shadow: 0 1px 4px rgba(214,51,108,.4); }
+    .rssi-slider::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%;
+      background: var(--accent-blue); cursor: pointer; border: none; }
+
+    /* Audit Filter Chips */
+    .audit-filter-row { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; overflow-x: auto; }
+    .audit-chip { padding: 5px 10px; border-radius: 16px; border: 1px solid var(--border-color);
+      background: #fff; font-size: .74rem; font-weight: 600; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+    .audit-chip.active { background: var(--text-main); color: #fff; border-color: var(--text-main); }
+    .audit-chip-clear { margin-left: auto; background: none; border: none; font-size: .72rem;
+      color: var(--text-muted); cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+    .audit-chip-clear:hover { color: var(--sos-red); }
+
+    /* Device Status Badges */
+    .device-badge { display: inline-block; font-size: .65rem; font-weight: 800; padding: 2px 6px;
+      border-radius: 6px; text-transform: uppercase; margin-top: 3px; letter-spacing: .3px; }
+    .badge-camera { background: rgba(225,29,72,.15); color: var(--sos-red); border: 1px solid rgba(225,29,72,.3); }
+    .badge-safe { background: rgba(9,137,104,.15); color: var(--accent-green); border: 1px solid rgba(9,137,104,.3); }
+    .badge-unscanned { background: rgba(0,0,0,.05); color: var(--text-muted); }
+
+    /* Camera Found / Not Found Resolution Buttons */
+    .rbtn.cam-found { background-color: var(--sos-red); border-color: var(--sos-red); color: #fff; font-size: .88rem; flex-basis: 48%; }
+    .rbtn.cam-safe { background-color: var(--accent-green); border-color: var(--accent-green); color: #fff; font-size: .88rem; flex-basis: 48%; }
+
     .signal-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
     .signal-tab { flex: 1; padding: 7px 10px; border: 1px solid var(--border-color); border-radius: 10px;
       background: #fff7fa; color: var(--text-muted); font-size: .78rem; font-weight: 600; cursor: pointer; text-align: center; }
@@ -426,6 +461,23 @@ const char index_html[] PROGMEM = R"rawliteral(
           <span class="card-title" style="margin-bottom:0;">Pick a device to find</span>
           <span id="totalSignalCount" style="font-size:.75rem;color:var(--text-muted);">0 signals</span>
         </div>
+
+        <!-- 1) Signal Strength RSSI Threshold Horizontal Scroller -->
+        <div class="rssi-filter-wrap">
+          <div class="rssi-filter-header">
+            <span class="rssi-filter-label">⚡ Signal Strength Threshold</span>
+            <span class="rssi-filter-val" id="rssiThresholdVal">ALL SIGNALS (-100 dBm)</span>
+          </div>
+          <input type="range" class="rssi-slider" id="rssiThresholdSlider" min="-100" max="-30" value="-100" step="1">
+        </div>
+
+        <!-- 3) Filter By Scanned Status -->
+        <div class="audit-filter-row">
+          <button class="audit-chip active" id="auditFilterAll">All Signals</button>
+          <button class="audit-chip" id="auditFilterScanned">Scanned (<span id="scannedCount">0</span>)</button>
+          <button class="audit-chip" id="auditFilterUnscanned">Not Scanned (<span id="unscannedCount">0</span>)</button>
+          <button class="audit-chip-clear" id="btnClearHistory" title="Clear saved scan history">🗑️ Clear</button>
+        </div>
         <div class="signal-tabs">
           <button class="signal-tab active" id="stWifi">📶 Wi-Fi (<span id="wifiCount">0</span>)</button>
           <button class="signal-tab" id="stBle">🔵 Bluetooth (<span id="bleCount">0</span>)</button>
@@ -465,6 +517,9 @@ const char index_html[] PROGMEM = R"rawliteral(
           <button class="rbtn read hidden" id="btnRead">📍 Read here</button>
           <button class="rbtn" id="btnLinkGyro">🧭 <span id="gyroBtnText">Link Compass</span></button>
           <button class="rbtn wall hidden" id="btnHitWall">🧱 Edit walls</button>
+          <!-- 2) Resolved options: Camera Found / No Camera -->
+          <button class="rbtn cam-found hidden" id="btnMarkCamera">🚨 Camera Found</button>
+          <button class="rbtn cam-safe hidden" id="btnMarkNoCamera">🛡️ No Camera</button>
           <button class="rbtn drop hidden" id="btnDropTarget">✕ Drop</button>
           <button class="rbtn demo" id="btnSimTarget">⚡ Demo</button>
         </div>
@@ -601,15 +656,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     const blinkStatus = document.getElementById('blinkStatus');
     let cameraStream = null;
     let processingFrameId = null;
-    let trackedTargets = [];
-    let nextTargetId = 1;
     let simulationEnabled = false;
-
-    // Expected 0.5s rate: 500ms ON / 500ms OFF (1.0 Hz)
-    const EXPECTED_LED_HALF_CYCLE_MS = 500;
-    const MIN_VALID_HALF_CYCLE_MS = 280;
-    const MAX_VALID_HALF_CYCLE_MS = 750;
-    const STATIC_THRESHOLD_MS = 800; // Continuous ON > 800ms means static light/object (NOT blinking!)
 
     const setCameraStatus = (isOn) => {
       cameraStatus.innerHTML = isOn
@@ -621,368 +668,412 @@ const char index_html[] PROGMEM = R"rawliteral(
       cameraStatus.style.color = isOn ? 'var(--accent-green)' : 'var(--accent-blue)';
     };
 
+    // ═══ Optical IR & Blinking Spy Camera Detector (From Hackathon Materials) ═══
+    const config = {
+      hueCenter: 300,
+      hueTolerance: 45,
+      minSaturation: 0.15,
+      minLightness: 0.20,
+      blinkRateTarget: 500, // 500 ms target
+      sensitivity: 6
+    };
+
+    const GRID_W = 320;
+    const GRID_H = 240;
+    processingCanvas.width = GRID_W;
+    processingCanvas.height = GRID_H;
+
+    let isSimulating = false;
+    let simAngle = 0;
+    let simBlinkState = true;
+    let lastSimBlinkTime = Date.now();
+
+    let trackedTargets = [];
+    let nextTargetId = 1;
+    let primaryTargetId = null;
+
     const rgbToHsl = (r, g, b) => {
       r /= 255; g /= 255; b /= 255;
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const lightness = (max + min) / 2;
-      const delta = max - min;
-      if (delta === 0) return { hue: 0, saturation: 0, lightness };
-      const saturation = delta / (1 - Math.abs(2 * lightness - 1));
-      let hue;
-      if (max === r) hue = 60 * (((g - b) / delta) % 6);
-      else if (max === g) hue = 60 * (((b - r) / delta) + 2);
-      else hue = 60 * (((r - g) / delta) + 4);
-      return { hue: hue < 0 ? hue + 360 : hue, saturation, lightness };
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h, s, l = (max + min) / 2;
+      
+      if (max === min) {
+        h = s = 0;
+      } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+          case g: h = (b - r) / d + 2; break;
+          case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+      }
+      return [h * 360, s, l];
     };
 
-    // Detects optical light candidates across all colors (IR, Red, White, Blue, Green, Amber, etc.)
-    const getOpticalCandidate = (r, g, b) => {
-      // 1. Near-Infrared (IR): Appears as pink/magenta/purple on digital camera sensors
-      if (r >= 60 && b >= 60 && (r > g + 10 || b > g + 10)) {
-        const hsl = rgbToHsl(r, g, b);
-        if (hsl.hue >= 260 && hsl.hue <= 355 && hsl.saturation >= 0.15 && hsl.lightness >= 0.20) {
-          return { type: 'IR', name: 'IR Lens' };
-        }
-      }
-      // 2. High-intensity White core (often center of intense IR or white LEDs)
-      if (r >= 200 && g >= 200 && b >= 200) {
-        return { type: 'WHITE', name: 'White LED' };
-      }
-      // 3. Red LED
-      if (r >= 110 && r > g + 35 && r > b + 35) {
-        return { type: 'RED', name: 'Red LED' };
-      }
-      // 4. Green LED
-      if (g >= 110 && g > r + 35 && g > b + 35) {
-        return { type: 'GREEN', name: 'Green LED' };
-      }
-      // 5. Blue LED
-      if (b >= 110 && b > r + 35 && b > g + 35) {
-        return { type: 'BLUE', name: 'Blue LED' };
-      }
-      // 6. Amber / Yellow LED
-      if (r >= 140 && g >= 95 && b < 90 && (r > b + 45)) {
-        return { type: 'AMBER', name: 'Amber LED' };
-      }
-      // 7. Any bright, saturated colour (including colours not covered above).
-      // The brightness floor is deliberately lower than the old white-only floor,
-      // so dimmer LEDs still register after camera exposure adjustments.
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const lum = (0.299 * r + 0.587 * g + 0.114 * b);
-      if (max >= 145 && (max - min) >= 35 && lum >= 95) {
-        return { type: 'COLOR', name: 'Bright Color' };
-      }
-      // 8. General concentrated bright optical spot, including glare/white LEDs.
-      if (lum >= 155) {
-        return { type: 'OPTICAL', name: 'Optical Light' };
-      }
-      return null;
-    };
-
-    function findOpticalBlobs(imageData) {
-      const { data, width, height } = imageData;
-      const size = width * height;
-      const matches = new Uint8Array(size);
-      const types = new Array(size);
-
-      for (let index = 0; index < size; index++) {
-        const offset = index * 4;
-        const candidate = getOpticalCandidate(data[offset], data[offset + 1], data[offset + 2]);
-        if (candidate) {
-          matches[index] = 1;
-          types[index] = candidate.type;
-        }
-      }
-
-      const visited = new Uint8Array(size);
+    const findBlobs = (pixels) => {
+      if (pixels.length === 0) return [];
+      
+      const visited = new Set();
       const blobs = [];
-      for (let start = 0; start < size; start++) {
-        if (!matches[start] || visited[start]) continue;
-        const queue = [start];
-        visited[start] = 1;
-        let pixels = 0, totalX = 0, totalY = 0, totalBrightness = 0;
-        let minX = width, minY = height, maxX = 0, maxY = 0;
-        const typeCounts = {};
+      const pixelGrid = {};
+      pixels.forEach(p => {
+        pixelGrid[`${p.x},${p.y}`] = p;
+      });
 
-        for (let head = 0; head < queue.length; head++) {
-          const current = queue[head];
-          const x = current % width;
-          const y = Math.floor(current / width);
-          const offset = current * 4;
-          pixels++;
-          totalX += x; totalY += y;
-          totalBrightness += (data[offset] + data[offset + 1] + data[offset + 2]) / 3;
-          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      pixels.forEach(p => {
+        const key = `${p.x},${p.y}`;
+        if (visited.has(key)) return;
 
-          const t = types[current];
-          if (t) typeCounts[t] = (typeCounts[t] || 0) + 1;
+        const queue = [p];
+        visited.add(key);
+        
+        let minX = p.x, maxX = p.x;
+        let minY = p.y, maxY = p.y;
+        let sumX = 0, sumY = 0;
+        let sumIntensity = 0;
+        let pCount = 0;
 
-          const neighbours = [current - 1, current + 1, current - width, current + width];
-          for (const next of neighbours) {
-            if (next < 0 || next >= size || visited[next] || !matches[next]) continue;
-            const nextX = next % width;
-            if (Math.abs(nextX - x) > 1) continue;
-            visited[next] = 1;
-            queue.push(next);
+        while (queue.length > 0) {
+          const curr = queue.shift();
+          sumX += curr.x;
+          sumY += curr.y;
+          sumIntensity += curr.intensity;
+          pCount++;
+
+          if (curr.x < minX) minX = curr.x;
+          if (curr.x > maxX) maxX = curr.x;
+          if (curr.y < minY) minY = curr.y;
+          if (curr.y > maxY) maxY = curr.y;
+
+          for (let dx = -4; dx <= 4; dx += 2) {
+            for (let dy = -4; dy <= 4; dy += 2) {
+              if (dx === 0 && dy === 0) continue;
+              const nx = curr.x + dx;
+              const ny = curr.y + dy;
+              const nKey = `${nx},${ny}`;
+              
+              if (pixelGrid[nKey] && !visited.has(nKey)) {
+                visited.add(nKey);
+                queue.push(pixelGrid[nKey]);
+              }
+            }
           }
         }
 
-        const blobWidth = maxX - minX + 1;
-        const blobHeight = maxY - minY + 1;
-
-        // Discard large non-LED surfaces (walls, shirts)
-        if (pixels >= 2 && pixels <= 1800 && blobWidth <= 100 && blobHeight <= 100) {
-          let dominantType = 'OPTICAL';
-          let maxCount = 0;
-          for (const [k, v] of Object.entries(typeCounts)) {
-            if (v > maxCount) { maxCount = v; dominantType = k; }
-          }
+        const minSize = Math.max(1, 11 - config.sensitivity); 
+        const maxSize = 250;
+        const maxDim = 50;
+        const blobW = (maxX - minX) + 1;
+        const blobH = (maxY - minY) + 1;
+        if (pCount >= minSize && pCount <= maxSize && blobW <= maxDim && blobH <= maxDim) {
           blobs.push({
-            x: totalX / pixels,
-            y: totalY / pixels,
-            pixels,
-            brightness: totalBrightness / pixels,
-            type: dominantType,
-            minX, minY, width: blobWidth, height: blobHeight
+            x: minX,
+            y: minY,
+            w: blobW,
+            h: blobH,
+            cx: sumX / pCount,
+            cy: sumY / pCount,
+            intensity: sumIntensity / pCount,
+            size: pCount
           });
         }
-      }
+      });
+
       return blobs;
-    }
+    };
 
-    // Multi-target tracking: tracks all lights in the scene simultaneously
-    function updateMultiTargetTracking(blobs, imageData, now) {
-      const { data, width, height } = imageData;
-      const matchedBlobIndices = new Set();
-      const maxDistance = 65;
+    const trackBlobs = (blobs, now, viewW, viewH) => {
+      const scaleX = viewW / GRID_W;
+      const scaleY = viewH / GRID_H;
 
-      // 1. Update existing targets
+      const currentBlobs = blobs.map(b => ({
+        x: b.x * scaleX,
+        y: b.y * scaleY,
+        w: b.w * scaleX,
+        h: b.h * scaleY,
+        cx: b.cx * scaleX,
+        cy: b.cy * scaleY,
+        intensity: b.intensity
+      }));
+
+      const matchThreshold = 200;
+      const targetUsed = new Set();
+
       trackedTargets.forEach(target => {
         let bestBlob = null;
-        let bestDist = Infinity;
+        let minDist = Infinity;
         let bestIdx = -1;
 
-        blobs.forEach((blob, idx) => {
-          if (matchedBlobIndices.has(idx)) return;
-          const dist = Math.hypot(blob.x - target.x, blob.y - target.y);
-          if (dist <= maxDistance && dist < bestDist) {
-            bestDist = dist;
+        currentBlobs.forEach((blob, idx) => {
+          if (targetUsed.has(idx)) return;
+          const dist = Math.hypot(target.cx - blob.cx, target.cy - blob.cy);
+          if (dist < matchThreshold && dist < minDist) {
+            minDist = dist;
             bestBlob = blob;
             bestIdx = idx;
           }
         });
 
         if (bestBlob) {
-          // Matched blob: target is ON
-          matchedBlobIndices.add(bestIdx);
           target.x = target.x * 0.6 + bestBlob.x * 0.4;
           target.y = target.y * 0.6 + bestBlob.y * 0.4;
-          target.minX = bestBlob.minX;
-          target.minY = bestBlob.minY;
-          target.width = bestBlob.width;
-          target.height = bestBlob.height;
-          target.type = bestBlob.type;
+          target.w = target.w * 0.7 + bestBlob.w * 0.3;
+          target.h = target.h * 0.7 + bestBlob.h * 0.3;
+          target.cx = target.cx * 0.6 + bestBlob.cx * 0.4;
+          target.cy = target.cy * 0.6 + bestBlob.cy * 0.4;
           target.lastSeen = now;
-          target.isOn = true;
+          target.active = true;
+          
+          target.signalHistory.push({ time: now, val: bestBlob.intensity });
+          targetUsed.add(bestIdx);
         } else {
-          // No blob matched: sample around the previous footprint to detect OFF.
-          const cx = Math.round(target.x);
-          const cy = Math.round(target.y);
-          const radius = Math.max(8, Math.min(18, Math.ceil(Math.max(target.width, target.height) * 0.75)));
-          let opticalPixels = 0;
-          for (let y = Math.max(0, cy - radius); y <= Math.min(height - 1, cy + radius); y++) {
-            for (let x = Math.max(0, cx - radius); x <= Math.min(width - 1, cx + radius); x++) {
-              const offset = (y * width + x) * 4;
-              if (getOpticalCandidate(data[offset], data[offset + 1], data[offset + 2])) opticalPixels++;
-            }
-          }
-          target.isOn = (opticalPixels >= Math.max(2, Math.floor(target.width * target.height * 0.08)));
+          target.active = false;
+          target.signalHistory.push({ time: now, val: 0 });
         }
 
-        // Analyze blink rate for this target
-        analyzeTargetBlink(target, now);
+        while (target.signalHistory.length > 0 && now - target.signalHistory[0].time > 5500) {
+          target.signalHistory.shift();
+        }
+
+        analyzeBlinkFrequency(target, now);
       });
 
-      // 2. Remove targets not seen for > 2000 ms
-      trackedTargets = trackedTargets.filter(t => (now - t.lastSeen) <= 2000);
-
-      // 3. Create new targets for unmatched blobs (up to max 8 concurrent targets)
-      blobs.forEach((blob, idx) => {
-        if (matchedBlobIndices.has(idx)) return;
-        if (trackedTargets.length >= 8) return;
-
-        trackedTargets.push({
+      currentBlobs.forEach((blob, idx) => {
+        if (targetUsed.has(idx)) return;
+        
+        const newTarget = {
           id: nextTargetId++,
           x: blob.x,
           y: blob.y,
-          minX: blob.minX,
-          minY: blob.minY,
-          width: blob.width,
-          height: blob.height,
-          type: blob.type,
-          isOn: true,
+          w: blob.w,
+          h: blob.h,
+          cx: blob.cx,
+          cy: blob.cy,
+          firstSeen: now,
           lastSeen: now,
-          lastBlinkState: true,
-          lastTransitionAt: now,
+          active: true,
+          signalHistory: [{ time: now, val: blob.intensity }],
+          threatScore: 0,
+          blinkState: true,
+          lastTransitionTime: now,
           transitions: [],
-          score: 0,
-          status: 'ANALYZING',
-          interval: 0
-        });
+          isCamera: false
+        };
+        trackedTargets.push(newTarget);
       });
-    }
 
-    function analyzeTargetBlink(target, now) {
-      const isOn = target.isOn;
+      trackedTargets = trackedTargets.filter(t => now - t.lastSeen < 1500);
 
-      // Detect state transition with debounce (ignore < 130ms frame noise)
-      if (isOn !== target.lastBlinkState && (now - target.lastTransitionAt >= 130)) {
-        const interval = now - target.lastTransitionAt;
-        target.lastBlinkState = isOn;
-        target.lastTransitionAt = now;
+      if (trackedTargets.length > 0) {
+        if (!primaryTargetId || !trackedTargets.find(t => t.id === primaryTargetId)) {
+          const bestTarget = trackedTargets.reduce((prev, curr) => {
+            return (curr.threatScore > prev.threatScore) ? curr : prev;
+          }, trackedTargets[0]);
+          primaryTargetId = bestTarget.id;
+        }
+      } else {
+        primaryTargetId = null;
+      }
+    };
 
-        if (interval >= MIN_VALID_HALF_CYCLE_MS && interval <= MAX_VALID_HALF_CYCLE_MS) {
-          target.transitions.push(interval);
-          if (target.transitions.length > 8) target.transitions.shift();
-        } else if (interval > MAX_VALID_HALF_CYCLE_MS) {
+    const analyzeBlinkFrequency = (target, now) => {
+      const history = target.signalHistory;
+      if (history.length < 10) return;
+
+      let minVal = Infinity;
+      let maxVal = -Infinity;
+      history.forEach(pt => {
+        if (pt.val < minVal) minVal = pt.val;
+        if (pt.val > maxVal) maxVal = pt.val;
+      });
+
+      const range = maxVal - minVal;
+      const targetDur = config.blinkRateTarget;
+
+      if (range < 0.12) {
+        target.threatScore = Math.max(0, target.threatScore - 0.5);
+        if (target.threatScore < 40 && target.isCamera) {
+          target.isCamera = false;
+        }
+        return;
+      }
+
+      const timeSinceLastTransition = now - target.lastTransitionTime;
+      const timeoutThreshold = Math.max(1500, targetDur * 2.2);
+      if (timeSinceLastTransition > timeoutThreshold) {
+        target.threatScore = Math.max(0, target.threatScore - 0.5);
+        if (target.threatScore < 40 && target.isCamera) {
+          target.isCamera = false;
+        }
+        if (target.transitions.length > 0 && timeSinceLastTransition > timeoutThreshold + 1000) {
           target.transitions = [];
         }
       }
 
-      const timeInCurrentState = now - target.lastTransitionAt;
+      const thresholdVal = minVal + (range * 0.5);
+      const currentVal = history[history.length - 1].val;
+      const isCurrentlyOn = currentVal > thresholdVal;
 
-      // STATIC LIGHT REJECTION:
-      // If this specific light stays ON continuously for > 800ms without turning off,
-      // it is a static lamp/LED reflection. Score = 0% and threat rejected.
-      if (isOn && timeInCurrentState > STATIC_THRESHOLD_MS) {
-        target.transitions = [];
-        target.status = 'STATIC';
-        target.score = 0;
-        target.interval = 0;
-        return;
-      }
+      if (isCurrentlyOn !== target.blinkState) {
+        const duration = now - target.lastTransitionTime;
+        target.blinkState = isCurrentlyOn;
+        target.lastTransitionTime = now;
 
-      // If too few transitions to confirm rhythm
-      if (target.transitions.length < 3) {
-        target.status = 'ANALYZING';
-        target.score = Math.round((target.transitions.length / 3) * 35);
-        target.interval = 0;
-        return;
-      }
-
-      // Evaluate 0.5s (500ms) pattern consistency
-      const recent = target.transitions.slice(-6);
-      const avg = recent.reduce((sum, d) => sum + d, 0) / recent.length;
-      const matching = recent.filter(d => Math.abs(d - EXPECTED_LED_HALF_CYCLE_MS) <= 140).length;
-      const matchRatio = matching / recent.length;
-      const avgDev = recent.reduce((sum, d) => sum + Math.abs(d - EXPECTED_LED_HALF_CYCLE_MS), 0) / recent.length;
-
-      if (matchRatio >= 0.65 && avg >= 350 && avg <= 650) {
-        const accuracy = Math.max(0, 1 - (avgDev / 250));
-        let score = Math.round(accuracy * 100);
-        if (recent.length === 3) score = Math.min(score, 78);
-        else score = Math.min(100, Math.max(75, score));
-
-        target.score = score;
-        target.status = score >= 70 ? 'CONFIRMED' : 'ANALYZING';
-        target.interval = Math.round(avg);
-      } else {
-        target.score = 0;
-        target.status = 'WRONG_RATE';
-        target.interval = Math.round(avg);
-      }
-    }
-
-    // Draws overlay boxes for all simultaneously tracked targets
-    function drawDetections(targets) {
-      overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
-      if (!targets || targets.length === 0) return;
-
-      const scaleX = detectionOverlay.width / processingCanvas.width;
-      const scaleY = detectionOverlay.height / processingCanvas.height;
-
-      targets.forEach(target => {
-        const screenX = target.minX * scaleX;
-        const screenY = target.minY * scaleY;
-        const screenW = target.width * scaleX;
-        const screenH = target.height * scaleY;
-
-        const typeLabel = target.type ? target.type : 'OPTICAL';
-        let strokeColor = '#f59e0b';
-        let label = `VERIFYING ${typeLabel}...`;
-        let lineDash = [];
-
-        if (simulationEnabled) {
-          strokeColor = '#ef4444';
-          label = `DEMO IR SIGNAL (${target.score}%)`;
-        } else if (target.status === 'CONFIRMED') {
-          strokeColor = '#ef4444'; // Bright Red Alert
-          const rateText = target.interval > 0 ? ` (~${(target.interval / 1000).toFixed(2)}s)` : ' (~0.5s)';
-          label = `⚠️ CAMERA DETECTED [${typeLabel}]${rateText}`;
-        } else if (target.status === 'STATIC') {
-          strokeColor = '#94a3b8'; // Muted grey
-          label = `STATIC ${typeLabel} (IGNORED)`;
-          lineDash = [4, 4];
-        } else if (target.status === 'WRONG_RATE') {
-          strokeColor = '#eab308';
-          label = `${typeLabel}: ${(target.interval / 1000).toFixed(2)}s (NOT 0.5s)`;
-          lineDash = [3, 3];
-        } else {
-          strokeColor = '#3b82f6';
-          label = `ANALYZING ${typeLabel} (${target.score}%)`;
-          lineDash = [2, 2];
+        if (duration > 100 && duration < 2500) {
+          target.transitions.push({ time: now, dur: duration });
         }
 
-        overlayContext.save();
-        overlayContext.strokeStyle = strokeColor;
-        overlayContext.lineWidth = (target.status === 'CONFIRMED') ? 3 : 2;
-        overlayContext.setLineDash(lineDash);
+        if (target.transitions.length > 8) {
+          target.transitions.shift();
+        }
 
-        const pad = 4;
-        overlayContext.strokeRect(screenX - pad, screenY - pad, screenW + pad * 2, screenH + pad * 2);
-        overlayContext.setLineDash([]);
+        verifyTransitionsConsistency(target);
+      }
+    };
 
-        overlayContext.font = 'bold 11px system-ui, -apple-system, sans-serif';
-        const textWidth = overlayContext.measureText(label).width;
-        const labelY = Math.max(14, screenY - 8);
-
-        overlayContext.fillStyle = strokeColor;
-        overlayContext.fillRect(screenX - pad, labelY - 12, textWidth + 8, 15);
-
-        overlayContext.fillStyle = '#ffffff';
-        overlayContext.fillText(label, screenX - pad + 4, labelY);
-        overlayContext.restore();
-      });
-    }
-
-    function drawSimulationDot(now) {
-      if (!simulationEnabled) return;
-      const isSimOn = Math.floor(now / 500) % 2 === 1;
-      if (!isSimOn) return;
-      const x = 160;
-      const y = 120;
-      processingContext.fillStyle = '#ff00ff';
-      processingContext.beginPath();
-      processingContext.arc(x, y, 6, 0, Math.PI * 2);
-      processingContext.fill();
-    }
-
-    // Draws uncropped, unzoomed full field-of-view camera frame
-    function drawCameraFrame() {
-      const sourceWidth = cameraPreview.videoWidth;
-      const sourceHeight = cameraPreview.videoHeight;
-      if (!sourceWidth || !sourceHeight) return;
-
-      // Automatically size the container to match the camera's native aspect ratio (NO AUTO-ZOOM!)
-      const expectedAspect = sourceWidth + ' / ' + sourceHeight;
-      if (cameraCanvasContainer.style.aspectRatio !== expectedAspect) {
-        cameraCanvasContainer.style.aspectRatio = expectedAspect;
+    const verifyTransitionsConsistency = (target) => {
+      if (target.transitions.length < 4) {
+        target.threatScore = Math.max(0, target.threatScore - 5);
+        return;
       }
 
-      // Synchronize overlay canvas pixel dimensions to the visible container
+      let matchCount = 0;
+      const recentTrans = target.transitions.slice(-6);
+      const targetRate = config.blinkRateTarget;
+      const tolerance = Math.max(80, targetRate * 0.20);
+
+      recentTrans.forEach(tr => {
+        if (Math.abs(tr.dur - targetRate) <= tolerance) {
+          matchCount++;
+        }
+      });
+
+      const matchRatio = matchCount / recentTrans.length;
+
+      let totalJitter = 0;
+      for (let i = 1; i < recentTrans.length; i++) {
+        totalJitter += Math.abs(recentTrans[i].dur - recentTrans[i-1].dur);
+      }
+      const avgJitter = recentTrans.length > 1 ? totalJitter / (recentTrans.length - 1) : 0;
+      const maxAllowedJitter = Math.max(80, targetRate * 0.25);
+
+      if (matchRatio >= 0.75 && avgJitter <= maxAllowedJitter) {
+        target.threatScore = Math.min(100, target.threatScore + 15);
+        if (target.threatScore >= 75 && !target.isCamera) {
+          target.isCamera = true;
+        }
+      } else {
+        target.threatScore = Math.max(0, target.threatScore - 15);
+        if (target.threatScore < 40 && target.isCamera) {
+          target.isCamera = false;
+        }
+      }
+    };
+
+    const drawHud = (now, viewW, viewH) => {
+      overlayContext.clearRect(0, 0, viewW, viewH);
+
+      trackedTargets.forEach(target => {
+        if (target.threatScore < 30) return;
+
+        const x = Math.max(0, target.x);
+        const y = Math.max(0, target.y);
+        const w = Math.min(viewW - x, target.w);
+        const h = Math.min(viewH - y, target.h);
+
+        const isPrimary = (target.id === primaryTargetId);
+        const isConfirmed = target.threatScore >= 75;
+        const hudColor = isConfirmed ? '#ef4444' : '#f59e0b';
+        const labelText = isConfirmed 
+          ? `⚠️ CAMERA DETECTED (${Math.round(target.threatScore)}%)`
+          : `ANALYZING BLINK (${Math.round(target.threatScore)}%)`;
+
+        overlayContext.strokeStyle = hudColor;
+        overlayContext.lineWidth = isConfirmed ? 3 : 2;
+        overlayContext.setLineDash(isConfirmed ? [] : [4, 4]);
+        overlayContext.strokeRect(x, y, w, h);
+        overlayContext.setLineDash([]);
+        
+        if (isPrimary && isConfirmed) {
+          const bracketSize = Math.max(10, Math.min(w * 0.25, 20));
+          overlayContext.lineWidth = 4;
+          
+          overlayContext.beginPath();
+          overlayContext.moveTo(x + bracketSize, y); overlayContext.lineTo(x, y); overlayContext.lineTo(x, y + bracketSize);
+          overlayContext.stroke();
+
+          overlayContext.beginPath();
+          overlayContext.moveTo(x + w - bracketSize, y); overlayContext.lineTo(x + w, y); overlayContext.lineTo(x + w, y + bracketSize);
+          overlayContext.stroke();
+
+          overlayContext.beginPath();
+          overlayContext.moveTo(x + bracketSize, y + h); overlayContext.lineTo(x, y + h); overlayContext.lineTo(x, y + bracketSize);
+          overlayContext.stroke();
+
+          overlayContext.beginPath();
+          overlayContext.moveTo(x + w - bracketSize, y + h); overlayContext.lineTo(x + w, y + h); overlayContext.lineTo(x + w, y + h - bracketSize);
+          overlayContext.stroke();
+
+          overlayContext.strokeStyle = 'rgba(239, 68, 68, 0.25)';
+          overlayContext.lineWidth = 1;
+          overlayContext.beginPath();
+          overlayContext.moveTo(0, target.cy); overlayContext.lineTo(viewW, target.cy);
+          overlayContext.stroke();
+
+          overlayContext.beginPath();
+          overlayContext.moveTo(target.cx, 0); overlayContext.lineTo(target.cx, viewH);
+          overlayContext.stroke();
+          
+          overlayContext.strokeStyle = hudColor;
+          overlayContext.beginPath();
+          const ringRad = Math.max(w, h) * (0.8 + Math.sin(now / 100) * 0.1);
+          overlayContext.arc(target.cx, target.cy, ringRad, 0, Math.PI * 2);
+          overlayContext.stroke();
+        }
+
+        overlayContext.fillStyle = hudColor;
+        overlayContext.font = 'bold 11px system-ui, -apple-system, sans-serif';
+        
+        const labelWidth = overlayContext.measureText(labelText).width;
+        overlayContext.fillRect(x, Math.max(12, y - 16), labelWidth + 8, 14);
+        
+        overlayContext.fillStyle = '#ffffff';
+        overlayContext.fillText(labelText, x + 4, Math.max(22, y - 6));
+      });
+    };
+
+    const updateDashboardData = (now) => {
+      if (trackedTargets.length === 0) {
+        blinkScore.textContent = '0%';
+        blinkStatus.textContent = isSimulating ? '(Simulating 500ms spy cam...)' : '(No optical target detected)';
+        blinkStatus.style.color = 'var(--text-muted)';
+        return;
+      }
+
+      const primaryTarget = trackedTargets.find(t => t.id === primaryTargetId) || trackedTargets[0];
+      const threat = Math.round(primaryTarget.threatScore);
+      blinkScore.textContent = `${threat}%`;
+
+      if (threat >= 75) {
+        blinkStatus.textContent = `🚨 COVERT CAMERA CONFIRMED! 500ms rhythmic blink locked`;
+        blinkStatus.style.color = '#ef4444';
+      } else if (threat >= 40) {
+        blinkStatus.textContent = `⚠️ Strobing optical signature detected — analyzing 500ms rhythm (${threat}%)...`;
+        blinkStatus.style.color = 'var(--accent-blue)';
+      } else {
+        blinkStatus.textContent = `Target under observation (${threat}%) — monitoring stability...`;
+        blinkStatus.style.color = 'var(--text-muted)';
+      }
+    };
+
+    const processFrame = () => {
+      if (!cameraStream) return;
+
+      const now = Date.now();
+
+      // Synchronize overlay canvas pixel dimensions with display container
       const containerRect = cameraCanvasContainer.getBoundingClientRect();
       const containerW = Math.round(containerRect.width);
       const containerH = Math.round(containerRect.height);
@@ -993,57 +1084,64 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
       }
 
-      // Draw full uncropped camera feed directly onto processing canvas
-      processingContext.drawImage(
-        cameraPreview,
-        0, 0, sourceWidth, sourceHeight,
-        0, 0, processingCanvas.width, processingCanvas.height
-      );
-    }
+      // Draw camera preview onto 320x240 processing canvas
+      processingContext.drawImage(cameraPreview, 0, 0, GRID_W, GRID_H);
 
-    function processCameraFrame() {
-      if (!cameraStream || cameraPreview.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-        processingFrameId = requestAnimationFrame(processCameraFrame);
-        return;
-      }
-      drawCameraFrame();
-      drawSimulationDot(performance.now());
-      const now = performance.now();
-      const imgData = processingContext.getImageData(0, 0, processingCanvas.width, processingCanvas.height);
-      const blobs = findOpticalBlobs(imgData);
-
-      updateMultiTargetTracking(blobs, imgData, now);
-
-      // Determine highest threat among all simultaneously tracked targets
-      const confirmedTarget = trackedTargets.find(t => t.status === 'CONFIRMED');
-      const analyzingTarget = trackedTargets.find(t => t.status === 'ANALYZING');
-      const maxScore = trackedTargets.reduce((max, t) => Math.max(max, t.score), 0);
-
-      blinkScore.textContent = maxScore + '%';
-
-      if (simulationEnabled) {
-        blinkStatus.textContent = '(Demo 0.5s IR blink signal simulated)';
-        blinkStatus.style.color = 'var(--accent-blue)';
-      } else if (trackedTargets.length === 0) {
-        blinkStatus.textContent = '(No optical target detected)';
-        blinkStatus.style.color = 'var(--text-muted)';
-      } else if (confirmedTarget) {
-        blinkStatus.textContent = '🚨 0.5s Blink verified (~' + confirmedTarget.interval + 'ms) — ' + confirmedTarget.type + ' Camera Detected!';
-        blinkStatus.style.color = '#ef4444';
-      } else if (analyzingTarget) {
-        blinkStatus.textContent = '⏳ ' + analyzingTarget.type + ' pulse detected — verifying 0.5s rate (' + analyzingTarget.score + '% match)...';
-        blinkStatus.style.color = 'var(--accent-blue)';
-      } else {
-        // Only static or wrong rate targets present
-        blinkStatus.textContent = '❌ Static lights detected (not blinking at 0.5s) — Threat rejected';
-        blinkStatus.style.color = '#94a3b8';
+      // Inject simulated 500ms blinking IR target when simulation is enabled
+      if (isSimulating) {
+        if (now - lastSimBlinkTime >= 500) {
+          simBlinkState = !simBlinkState;
+          lastSimBlinkTime = now;
+        }
+        
+        simAngle += 0.015;
+        const orbitRadiusX = GRID_W * 0.25;
+        const orbitRadiusY = GRID_H * 0.25;
+        const simX = Math.round(GRID_W / 2 + Math.cos(simAngle) * orbitRadiusX);
+        const simY = Math.round(GRID_H / 2 + Math.sin(simAngle) * orbitRadiusY);
+        
+        if (simBlinkState) {
+          processingContext.fillStyle = 'rgba(255, 30, 220, 1.0)';
+          processingContext.beginPath();
+          processingContext.arc(simX, simY, 3, 0, Math.PI * 2);
+          processingContext.fill();
+        }
       }
 
-      drawDetections(trackedTargets);
-      processingFrameId = requestAnimationFrame(processCameraFrame);
-    }
+      const imgData = processingContext.getImageData(0, 0, GRID_W, GRID_H);
+      const data = imgData.data;
+      const matchingPixels = [];
+      const stride = 2;
 
-    async function startCamera() {
+      for (let y = 0; y < GRID_H; y += stride) {
+        for (let x = 0; x < GRID_W; x += stride) {
+          const idx = (y * GRID_W + x) * 4;
+          const r = data[idx];
+          const g = data[idx+1];
+          const b = data[idx+2];
+          
+          if (r > 50 && b > 50 && r > g + 2 && b > g + 2) {
+            const [h, s, l] = rgbToHsl(r, g, b);
+            
+            let hueDiff = Math.abs(h - config.hueCenter);
+            if (hueDiff > 180) hueDiff = 360 - hueDiff;
+            
+            if (hueDiff <= config.hueTolerance && s >= config.minSaturation && l >= config.minLightness) {
+              matchingPixels.push({ x, y, intensity: l });
+            }
+          }
+        }
+      }
+
+      const blobs = findBlobs(matchingPixels);
+      trackBlobs(blobs, now, detectionOverlay.width, detectionOverlay.height);
+      drawHud(now, detectionOverlay.width, detectionOverlay.height);
+      updateDashboardData(now);
+
+      processingFrameId = requestAnimationFrame(processFrame);
+    };
+
+    const startCamera = async () => {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         logMessage('Camera access is unavailable in this browser.');
         return;
@@ -1053,31 +1151,12 @@ const char index_html[] PROGMEM = R"rawliteral(
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: { ideal: 'environment' }
           },
           audio: false
         });
-        // Prefer 1× zoom and continuous focus/exposure where the browser exposes
-        // those controls. Unsupported controls are simply left at device defaults.
-        const videoTrack = cameraStream.getVideoTracks()[0];
-        if (videoTrack && videoTrack.getCapabilities && videoTrack.applyConstraints) {
-          const capabilities = videoTrack.getCapabilities();
-          const deviceControls = {};
-          if (capabilities.zoom && capabilities.zoom.min <= 1 && capabilities.zoom.max >= 1) {
-            deviceControls.zoom = 1;
-          }
-          if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-            deviceControls.focusMode = 'continuous';
-          }
-          if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
-            deviceControls.exposureMode = 'continuous';
-          }
-          if (Object.keys(deviceControls).length) {
-            try { await videoTrack.applyConstraints({ advanced: [deviceControls] }); } catch (_) { /* Keep browser defaults. */ }
-          }
-        }
         cameraPreview.srcObject = cameraStream;
         await cameraPreview.play();
         cameraPreview.style.display = 'block';
@@ -1085,10 +1164,10 @@ const char index_html[] PROGMEM = R"rawliteral(
         cameraCanvasContainer.classList.add('camera-active');
         detectionOverlay.style.display = 'block';
         simulationToggleBtn.disabled = false;
-        processCameraFrame();
         cameraToggleBtn.textContent = 'Turn Camera Off';
         setCameraStatus(true);
-        logMessage('Camera started. Rear-facing camera selected when available.');
+        logMessage('Camera feed active. Point camera at hidden locations.');
+        processingFrameId = requestAnimationFrame(processFrame);
       } catch (error) {
         const message = error.name === 'NotAllowedError'
           ? 'Camera permission denied. Allow camera access and try again.'
@@ -1097,9 +1176,9 @@ const char index_html[] PROGMEM = R"rawliteral(
       } finally {
         cameraToggleBtn.disabled = false;
       }
-    }
+    };
 
-    function stopCamera() {
+    const stopCamera = () => {
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
         cameraStream = null;
@@ -1112,17 +1191,19 @@ const char index_html[] PROGMEM = R"rawliteral(
       cameraPreview.style.display = 'none';
       cameraPlaceholder.style.display = 'flex';
       cameraCanvasContainer.classList.remove('camera-active');
-      simulationEnabled = false;
+      isSimulating = false;
       simulationToggleBtn.disabled = true;
       simulationToggleBtn.textContent = 'Run Demo Blink';
       detectionOverlay.style.display = 'none';
       overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
       trackedTargets = [];
+      primaryTargetId = null;
       blinkScore.textContent = '0%';
       blinkStatus.textContent = '(No optical target detected)';
+      blinkStatus.style.color = 'var(--text-muted)';
       cameraToggleBtn.textContent = 'Turn Camera On';
       setCameraStatus(false);
-    }
+    };
 
     cameraToggleBtn.addEventListener('click', () => {
       if (cameraStream) {
@@ -1134,14 +1215,15 @@ const char index_html[] PROGMEM = R"rawliteral(
     });
 
     simulationToggleBtn.addEventListener('click', () => {
-      simulationEnabled = !simulationEnabled;
+      isSimulating = !isSimulating;
       trackedTargets = [];
+      primaryTargetId = null;
       blinkScore.textContent = '0%';
-      simulationToggleBtn.textContent = simulationEnabled ? 'Stop Demo Blink' : 'Run Demo Blink';
-      logMessage(simulationEnabled ? 'Demo IR blink simulation started.' : 'Demo IR blink simulation stopped.');
+      simulationToggleBtn.textContent = isSimulating ? 'Stop Demo Blink' : 'Run Demo Blink';
+      logMessage(isSimulating ? 'Demo IR blink simulation started.' : 'Demo IR blink simulation stopped.');
     });
 
-    tabWireless.addEventListener('click', () => {
+        tabWireless.addEventListener('click', () => {
       stopCamera();
       tabWireless.classList.add('active');
       tabWired.classList.remove('active');
@@ -1429,6 +1511,55 @@ const char index_html[] PROGMEM = R"rawliteral(
     const radarCanvas = $('radarCanvas'), rctx = radarCanvas.getContext('2d');
     const btnLinkGyro = $('btnLinkGyro'), gyroBtnText = $('gyroBtnText'), gyroStatusText = $('gyroStatus');
     const btnHitWall = $('btnHitWall'), btnRead = $('btnRead'), btnDropTarget = $('btnDropTarget');
+    const btnMarkCamera = $('btnMarkCamera'), btnMarkNoCamera = $('btnMarkNoCamera');
+
+    /*
+     * ══════════════════════════════════════════════════════════════════════════
+     * [FUTURE MOBILE APP PERSISTENCE & CLOUD AUDIT ROADMAP]
+     * In this web/ESP32 interface, inspected networks are saved in memory and
+     * local browser storage (localStorage).
+     *
+     * WHEN WE DEVELOP THE PRODUCTION MOBILE APP (Flutter / React Native):
+     * 1. On-Device SQLite Database: Store persistent logs of every inspected
+     *    BSSID, Bluetooth MAC address, signal attenuation, and physical room tag.
+     * 2. Audit Trail & Certification: Allow users to generate a "SheSafe Clearance Report"
+     *    PDF certifying the hotel room / changing room was swept and cleared.
+     * 3. Threat Cloud Sync: Confirmed spy camera MACs/BSSIDs will sync to the SheSafe
+     *    threat cloud database to instantly flag known hidden cameras for other users.
+     * 4. Multi-Room Management: Tag devices by room (e.g., "Bedroom", "Bathroom",
+     *    "Wardrobe") to maintain separate device profiles per location.
+     * ══════════════════════════════════════════════════════════════════════════
+     */
+    const SCANNED_STORAGE_KEY = 'shesafe_scanned_networks';
+    let scannedHistory = {};
+    try {
+      const stored = localStorage.getItem(SCANNED_STORAGE_KEY);
+      if (stored) scannedHistory = JSON.parse(stored);
+    } catch (_) { scannedHistory = {}; }
+
+    const saveScannedHistory = () => {
+      try { localStorage.setItem(SCANNED_STORAGE_KEY, JSON.stringify(scannedHistory)); } catch (_) {}
+      updateAuditFilterCounts();
+    };
+
+    let rssiThreshold = -100;
+    let auditFilter = 'all'; // 'all', 'scanned', 'unscanned'
+
+    const updateAuditFilterCounts = () => {
+      const allSignals = [...(lastWifiData || []), ...(lastBleData || [])];
+      let scCount = 0;
+      let unCount = 0;
+      const seenKeys = new Set();
+      allSignals.forEach(s => {
+        const key = String(s.bssid || s.id || '').toLowerCase();
+        if (!key || seenKeys.has(key)) return;
+        seenKeys.add(key);
+        if (scannedHistory[key]) scCount++;
+        else unCount++;
+      });
+      if ($('scannedCount')) $('scannedCount').textContent = scCount;
+      if ($('unscannedCount')) $('unscannedCount').textContent = unCount;
+    };
     const btnSimTarget = $('btnSimTarget');
     const wallPicker = $('wallPicker'), btnWallsDone = $('btnWallsDone');
     const wallBtns = Array.from(document.querySelectorAll('.wallbtn'));
@@ -1559,6 +1690,8 @@ const char index_html[] PROGMEM = R"rawliteral(
       connectCard.classList.toggle('hidden', on);
       btnHitWall.classList.toggle('hidden', !on);
       btnRead.classList.toggle('hidden', !on);
+      btnMarkCamera.classList.toggle('hidden', !on);
+      btnMarkNoCamera.classList.toggle('hidden', !on);
       btnDropTarget.classList.toggle('hidden', !on);
     }
 
@@ -1645,6 +1778,37 @@ const char index_html[] PROGMEM = R"rawliteral(
       render();
     }
     btnDropTarget.addEventListener('click', dropTarget);
+
+    btnMarkCamera.addEventListener('click', () => {
+      if (!target) return;
+      const key = String(target.id).toLowerCase();
+      scannedHistory[key] = {
+        id: target.id,
+        name: target.name,
+        type: target.type,
+        status: 'CAMERA',
+        timestamp: Date.now()
+      };
+      saveScannedHistory();
+      logMessage(`🚨 Target confirmed as SPY CAMERA: ${target.name} (${target.id})`);
+      alert(`🚨 Camera Confirmed!\n\nDevice: ${target.name} (${target.id})\nSaved in audit history as SPY CAMERA.`);
+      dropTarget();
+    });
+
+    btnMarkNoCamera.addEventListener('click', () => {
+      if (!target) return;
+      const key = String(target.id).toLowerCase();
+      scannedHistory[key] = {
+        id: target.id,
+        name: target.name,
+        type: target.type,
+        status: 'SAFE',
+        timestamp: Date.now()
+      };
+      saveScannedHistory();
+      logMessage(`🛡️ Target cleared: ${target.name} (${target.id}) marked as NO CAMERA (Safe).`);
+      dropTarget();
+    });
 
     // User arrived at the new spot and pressed Read.
     btnRead.addEventListener('click', () => {
@@ -1921,10 +2085,50 @@ const char index_html[] PROGMEM = R"rawliteral(
       return btn;
     }
 
+    const filterSignals = (signals, isWifi) => {
+      if (!Array.isArray(signals)) return [];
+      return signals.filter(sig => {
+        // 1. Signal strength threshold slider filter
+        if (sig.rssi < rssiThreshold) return false;
+
+        // 3. Already scanned vs Not scanned filter
+        const key = String(isWifi ? sig.bssid : (sig.id || sig.name || '')).toLowerCase();
+        const isScanned = Boolean(scannedHistory[key]);
+        if (auditFilter === 'scanned') return isScanned;
+        if (auditFilter === 'unscanned') return !isScanned;
+        return true;
+      });
+    };
+
     function renderWifiList(signals) {
       wifiList.innerHTML = '';
-      if (!signals.length) { wifiList.innerHTML = '<div class="empty-state"><span>📡</span>No Wi-Fi networks found</div>'; return; }
-      signals.slice().sort((a, b) => b.rssi - a.rssi).forEach(sig => {
+      updateAuditFilterCounts();
+      if (!signals || !signals.length) {
+        wifiList.innerHTML = '<div class="empty-state"><span>📡</span>No Wi-Fi networks found</div>';
+        return;
+      }
+      const filtered = filterSignals(signals, true);
+      if (!filtered.length) {
+        wifiList.innerHTML = `<div class="empty-state"><span>🔍</span>No signals match threshold (${rssiThreshold > -100 ? '≥ ' + rssiThreshold + ' dBm, ' : ''}${auditFilter === 'all' ? 'no devices' : auditFilter})</div>`;
+        return;
+      }
+      filtered.slice().sort((a, b) => b.rssi - a.rssi).forEach(sig => {
+        const key = String(sig.bssid || '').toLowerCase();
+        const record = scannedHistory[key];
+        let badgeHtml = '';
+        let btnText = 'Track';
+        if (record) {
+          if (record.status === 'CAMERA') {
+            badgeHtml = '<span class="device-badge badge-camera">🚨 SPY CAMERA</span>';
+            btnText = 'Re-Track';
+          } else {
+            badgeHtml = '<span class="device-badge badge-safe">🛡️ SAFE (NO CAM)</span>';
+            btnText = 'Re-Track';
+          }
+        } else {
+          badgeHtml = '<span class="device-badge badge-unscanned">⏳ Not Scanned</span>';
+        }
+
         const item = document.createElement('div');
         item.className = 'signal-item';
         item.innerHTML = `
@@ -1932,37 +2136,106 @@ const char index_html[] PROGMEM = R"rawliteral(
           <div class="signal-info">
             <div class="signal-name">${esc(sig.ssid) || '(Hidden)'}</div>
             <div class="signal-meta">Ch ${esc(sig.channel)} · ${esc(sig.bssid)}</div>
+            <div>${badgeHtml}</div>
           </div>
           <div class="rssi-bar-wrap">
             <span class="rssi-value">${esc(sig.rssi)} dBm</span>
             <div class="rssi-bar-bg"><div class="rssi-bar-fill" style="width:${rssiToPercent(sig.rssi)}%;background:${rssiColor(sig.rssi)};"></div></div>
           </div>`;
-        item.appendChild(makeTrackBtn('wifi', sig.bssid, sig.ssid || sig.bssid, sig.channel));
+        const btn = makeTrackBtn('wifi', sig.bssid, sig.ssid || sig.bssid, sig.channel);
+        btn.textContent = btnText;
+        item.appendChild(btn);
         wifiList.appendChild(item);
       });
     }
 
     function renderBleList(signals) {
       bleList.innerHTML = '';
-      if (!signals.length) { bleList.innerHTML = '<div class="empty-state"><span>🔵</span>No Bluetooth devices found</div>'; return; }
-      signals.slice().sort((a, b) => b.rssi - a.rssi).forEach(sig => {
+      updateAuditFilterCounts();
+      if (!signals || !signals.length) {
+        bleList.innerHTML = '<div class="empty-state"><span>🔵</span>No Bluetooth devices found</div>';
+        return;
+      }
+      const filtered = filterSignals(signals, false);
+      if (!filtered.length) {
+        bleList.innerHTML = `<div class="empty-state"><span>🔍</span>No Bluetooth signals match threshold (${rssiThreshold > -100 ? '≥ ' + rssiThreshold + ' dBm, ' : ''}${auditFilter === 'all' ? 'no devices' : auditFilter})</div>`;
+        return;
+      }
+      filtered.slice().sort((a, b) => b.rssi - a.rssi).forEach(sig => {
+        const key = String(sig.id || sig.name || '').toLowerCase();
+        const record = scannedHistory[key];
+        let badgeHtml = '';
+        let btnText = 'Track';
+        if (record) {
+          if (record.status === 'CAMERA') {
+            badgeHtml = '<span class="device-badge badge-camera">🚨 SPY CAMERA</span>';
+            btnText = 'Re-Track';
+          } else {
+            badgeHtml = '<span class="device-badge badge-safe">🛡️ SAFE (NO CAM)</span>';
+            btnText = 'Re-Track';
+          }
+        } else {
+          badgeHtml = '<span class="device-badge badge-unscanned">⏳ Not Scanned</span>';
+        }
+
         const item = document.createElement('div');
         item.className = 'signal-item';
         item.innerHTML = `
           <span class="signal-icon">🔹</span>
           <div class="signal-info">
             <div class="signal-name">${esc(sig.name)}</div>
-            <div class="signal-meta">Bluetooth LE</div>
+            <div class="signal-meta">Bluetooth LE - ${sig.id || 'identifier unavailable'}</div>
+            <div>${badgeHtml}</div>
           </div>
           <div class="rssi-bar-wrap">
             <span class="rssi-value">${esc(sig.rssi)} dBm</span>
             <div class="rssi-bar-bg"><div class="rssi-bar-fill" style="width:${rssiToPercent(sig.rssi)}%;background:${rssiColor(sig.rssi)};"></div></div>
           </div>`;
-        item.querySelector('.signal-meta').textContent = `Bluetooth LE - ${sig.id || 'identifier unavailable'}`;
-        item.appendChild(makeTrackBtn('ble', sig.id, sig.name || sig.id));
+        const btn = makeTrackBtn('ble', sig.id, sig.name || sig.id);
+        btn.textContent = btnText;
+        item.appendChild(btn);
         bleList.appendChild(item);
       });
     }
+
+    // Slider and audit filter control listeners
+    const rssiSlider = $('rssiThresholdSlider');
+    const rssiValDisplay = $('rssiThresholdVal');
+    if (rssiSlider) {
+      rssiSlider.addEventListener('input', () => {
+        rssiThreshold = Number(rssiSlider.value);
+        if (rssiThreshold <= -100) {
+          rssiValDisplay.textContent = 'ALL SIGNALS (-100 dBm)';
+        } else {
+          rssiValDisplay.textContent = `FILTER: ≥ ${rssiThreshold} dBm`;
+        }
+        renderWifiList(lastWifiData);
+        renderBleList(lastBleData);
+      });
+    }
+
+    const setAuditFilter = (filter) => {
+      auditFilter = filter;
+      $('auditFilterAll').classList.toggle('active', filter === 'all');
+      $('auditFilterScanned').classList.toggle('active', filter === 'scanned');
+      $('auditFilterUnscanned').classList.toggle('active', filter === 'unscanned');
+      renderWifiList(lastWifiData);
+      renderBleList(lastBleData);
+    };
+
+    $('auditFilterAll').addEventListener('click', () => setAuditFilter('all'));
+    $('auditFilterScanned').addEventListener('click', () => setAuditFilter('scanned'));
+    $('auditFilterUnscanned').addEventListener('click', () => setAuditFilter('unscanned'));
+
+    $('btnClearHistory').addEventListener('click', () => {
+      if (confirm('Clear all saved network scan results?')) {
+        scannedHistory = {};
+        saveScannedHistory();
+        logMessage('Cleared network inspection history.');
+        renderWifiList(lastWifiData);
+        renderBleList(lastBleData);
+      }
+    });
 
     function pulseRefresh(ok) {
       refreshDot.classList.remove('pulsing');
