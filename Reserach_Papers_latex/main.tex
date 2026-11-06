@@ -1,0 +1,191 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{url}
+
+\begin{document}
+
+\title{Embedded Radio Frequency and Computer Vision-Based Spy Camera Detector with Smartphone Integration}
+
+\author{\IEEEauthorblockN{Samarth S. Prabhu, Saamarth S., Amogh Neeli, Prajwal V. Jois, Dr. C. Nandeesh Kumar, and Dr. Pratiba D.}
+\IEEEauthorblockA{Rashtreeya Vidyalaya College of Engineering, Bengaluru, India}}
+
+\maketitle
+
+\begin{abstract}
+[Abstract reserved for Milestone 4.]
+\end{abstract}
+
+\begin{IEEEkeywords}
+[Index terms reserved for Milestone 4.]
+\end{IEEEkeywords}
+
+\section{Introduction}
+Miniaturized cameras can be concealed inside ordinary room fixtures, including clocks, chargers, smoke detectors, and bathroom fittings. Their use in hotels, hostels, washrooms, and short-term rentals creates a direct privacy risk because a victim may not know that a lens is present or where its footage is stored. Lodging platforms have introduced restrictions on indoor surveillance, but a policy cannot physically verify that a particular room is free from a concealed device. A practical inspection tool must therefore operate at the point of use and support a search before the room is occupied.
+
+Covert recording hardware splits into two physical threat classes that behave differently during a room sweep. A wireless camera sends video through a 2.4~GHz or 5~GHz Wi-Fi link, or exposes Bluetooth Low Energy (BLE) activity, whereas an offline or hardwired camera can record to local storage without producing a radio transmission. Optical approaches can reveal lens retro-reflection from either class; for example, Hide-and-Sweep uses a sequenced LED array to inspect concealed lenses~\cite{b1}. Radio analysis, in contrast, can identify an actively transmitting device but cannot expose a camera that records only to an SD card. A detector built around only one modality therefore leaves the alternate threat class unchecked.
+
+Prior academic detectors struggle in live room searches because they rely on hardware or network access that travelers rarely carry. LAPD requires a smartphone with a time-of-flight sensor~\cite{b2}; CamLoPA and the WLAN systems of An \emph{et al.} depend on Raspberry Pi/Linux monitor-mode hardware~\cite{b3}--\cite{b5}. AHCL captures traffic at a router link and assumes access to that path~\cite{b6}. Other radio-fingerprinting methods require raw I/Q acquisition through software-defined radio hardware~\cite{b7},~\cite{b8}. On the optical side, specular reflections from glass, metal, and other glossy surfaces can resemble a lens response~\cite{b1},~\cite{b2}. These systems do not provide one handheld workflow that combines optical and RF inspection with directional guidance and an in-room versus behind-wall decision.
+
+This work presents a smartphone-integrated multimodal detector for that workflow. A rear-mounted accessory houses a Seeed Studio XIAO ESP32-C5 with its bundled external antenna. The board supports dual-band 2.4~GHz/5~GHz Wi-Fi~6 and BLE sensing, directional scoring, and hit-wall room-boundary inference. A custom 3D-printed rig places 5~mm 940~nm IR LEDs around the smartphone rear camera so that the illumination and camera axes remain closely aligned for retro-reflection capture. The smartphone performs lens classification from the captured frames and presents both modes in one interface, which also includes a one-tap SOS emergency workflow. The core contributions are as follows:
+\begin{itemize}
+    \item A rear-mounted smartphone accessory that combines dual-band wireless sensing with 940~nm optical illumination, rather than treating RF and lens inspection as separate tools.
+    \item A low-cost hardware architecture based on the XIAO ESP32-C5, its bundled external antenna, and a custom 3D-printed LED rig that uses the smartphone camera, display, processor, and internal orientation sensors.
+    \item A handheld wireless-search design that targets directional scoring and hit-wall inference to distinguish a probable in-room transmitter from a signal received through a boundary.
+    \item A unified mobile workflow for wireless inspection, optical lens classification, device-history handling, and immediate SOS activation.
+\end{itemize}
+
+\begin{table*}[t]
+\centering
+\caption{Comparison of Surveyed Hidden-Camera and Related Wireless-Identification Studies.}
+\label{tab:comparison}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.21\textwidth} >{\raggedright\arraybackslash}p{0.26\textwidth} >{\raggedright\arraybackslash}p{0.28\textwidth}}
+\toprule
+\textbf{Study \& Venue} & \textbf{Modality \& Hardware Required} & \textbf{Core Mechanism \& Verified Metrics} & \textbf{Key Operational Limitations} \\
+\midrule
+Hide-and-Sweep, MobiSys 2026~\cite{b1} & Optical; phone LED case, ATmega328P, PCA9685 & Sequenced illumination and $\text{R}(2+1)\text{D-18}$; 93.9\% accuracy, 95\% detection, 7.2\% false positives. & Optical only; glare and diffusive covers cause errors; practical range is 100~cm. \\
+LAPD, SenSys 2021~\cite{b2} & Optical; smartphone with ToF sensor & ToF filters and CNN; 88.9\% detection and 16.67\% false positives. & Requires a ToF phone; one object per scan; assumes the camera faces the user. \\
+CamLoPA, IEEE S\&P 2025~\cite{b3} & Wi-Fi CSI; Raspberry Pi and monitor-mode NIC & Fresnel-zone CSI; 95.37\% detection and $17.23^{\circ}$ mean azimuth error. & Excludes one camera; needs straight walking paths; no distance or offline-camera detection. \\
+An \emph{et al.}, IEEE Access 2024 (real-time sensing)~\cite{b4} & Wireless traffic/RSSI; RPi~4 and monitor-mode USB adapter & Nilsimsa and LDPL; 3~s detection, 0.08~m error within 1~m. & Three-device hallway test; 2.4~GHz only; distance without direction. \\
+An \emph{et al.}, IEEE Access 2024 (wireless spotter)~\cite{b5} & Wireless traffic/RSSI; RPi~3B+ and monitor-mode USB NIC & Nilsimsa and RSSI tracing; packet TPR 0.197, TNR 1.0. & One lab environment; rough proximity only; no turn guidance. \\
+AHCL, IEEE LCN 2022~\cite{b6} & Wireless traffic; PC on router/AP link & SVM, autoencoder, room classifier; SVM test accuracy 0.9734. & Needs router access and per-room data; Zoom traffic uses a known port. \\
+MRFE, IEEE IoT-J 2024~\cite{b7} & RF fingerprinting; SDR and GPU & Raw-I/Q fingerprinting; 99.33\% on 16 USRP radios. & Closed-set device identification, not camera search; raw-I/Q capture required. \\
+FingerBLE, ICPADS 2023~\cite{b8} & BLE fingerprinting; HackRF One, GNU Radio, PC & CFO and I/Q-offset fingerprints; 89.10\% over 51 nodes. & Authenticates registered devices, not unknown cameras; requires SDR capture. \\
+Sadowski and Spachos, IEEE Access 2018~\cite{b9} & RSSI; RPi, BLE beacons, XBee, LoRa & Trilateration; Wi-Fi/BLE mean errors of 0.664~m/0.753~m. & Needs three fixed transmitters; localizes a receiver, not an unknown camera. \\
+Pravin \emph{et al.}, ICOEI 2022~\cite{b10} & RF detector, LilyPad/NodeMCU, ESP8266 & RF alerting and proposed jamming; no quantitative result. & No camera/RF discrimination or localization; jamming is unlawful in many jurisdictions. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Related Work and Research Gaps}
+Optical systems inspect the retro-reflection returned by a camera lens. LAPD uses a phone time-of-flight (ToF) sensor, geometric filters, and a convolutional neural network; it detected 8 of 9 camera objects (88.9\%) after majority voting~\cite{b2}. The reported 16.67\% false-positive rate across 30 objects shows why glossy surfaces require explicit rejection stages. LAPD remains limited to ToF-equipped phones and scans one object at a time. Hide-and-Sweep instead keeps the phone camera fixed while five LED sequences alter the illumination direction. Its case contains an ATmega328P and a PCA9685 PWM controller, while an $\text{R}(2+1)\text{D-18}$ classifier evaluates the reflection sequence~\cite{b1}. The system reported at least 96.7\% accuracy in its tested indoor lighting conditions and core parts below US\$7, but it performs optical inspection only and cannot identify RF-emitting cameras. Table~\ref{tab:comparison} summarizes the optical, wireless, and fingerprinting studies surveyed in this section.
+
+Wireless methods inspect traffic or propagation changes from an active camera. CamLoPA combines Wi-Fi channel-state information (CSI), Fresnel-zone analysis, and user motion to estimate a camera azimuth; its procedure requires two orthogonal walking paths, with an additional walk to resolve the quadrant~\cite{b3}. The reported 95.37\% detection result excludes one of the seven test cameras, and the system relies on Raspberry Pi monitor-mode hardware. An \emph{et al.} use Nilsimsa packet-similarity hashing and an RSSI log-distance path-loss model to detect streaming devices and estimate distance~\cite{b4},~\cite{b5}. Their later system reported detection within 3~s and mean distance errors of about 0.08~m within 1~m and 0.45~m within 3~m; it does not provide turn guidance. In the earlier study, Nilsimsa produced a packet-level true-positive rate of 0.197, despite a true-negative rate of 1.0~\cite{b5}. Both studies require Linux monitor-mode capture. AHCL likewise depends on router-link traffic capture and a known Zoom configuration, whereas the RSSI benchmark of Sadowski and Spachos requires three fixed, known transmitters for trilateration~\cite{b6},~\cite{b9}.
+
+RF fingerprinting studies address transmitter identity rather than practical hidden-camera search. MRFE obtained 99.33\% accuracy on 16 USRP X310 radios from raw I/Q data, while FingerBLE reported 89.10\% identification accuracy across 51 BLE nodes from carrier-frequency offset and I/Q-offset features~\cite{b7},~\cite{b8}. Both depend on software-defined-radio capture and are not camera-detection systems. At the low-cost end, Pravin \emph{et al.} describe an Arduino/ESP8266-class RF detector, alert mechanism, and jamming step~\cite{b10}. The work presents no quantitative evaluation, cannot distinguish a camera from ambient RF activity, and proposes RF jamming, which is unlawful in many jurisdictions.
+
+The surveyed literature leaves three defensible engineering gaps. First, no evaluated system in this set provides a smartphone-accessory workflow that examines offline optical lenses and 2.4~GHz/5~GHz wireless transmitters without a ToF-equipped phone or an external Linux/SDR rig. Second, no study combines live handheld directional scoring with room-boundary (hit-wall) inference. Third, a low-cost design must separate continuous camera traffic and true lens retro-reflections from benign household transmissions and specular room surfaces. These requirements motivate a dual-mode architecture that treats RF and optical evidence as complementary rather than interchangeable.
+
+\begin{table*}[t]
+\centering
+\caption{Proposed Accessory BoM and Contrast With Prior Hardware Classes.}
+\label{tab:bom}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.24\textwidth} >{\raggedright\arraybackslash}p{0.08\textwidth} >{\raggedright\arraybackslash}p{0.14\textwidth} >{\raggedright\arraybackslash}p{0.28\textwidth}}
+\toprule
+\textbf{Component} & \textbf{Part/form} & \textbf{Qty.} & \textbf{Approx. cost} & \textbf{Role} \\
+\midrule
+Wireless controller and antenna & Seeed Studio XIAO ESP32-C5, SKU R266091; bundled external antenna & 1 & INR 979 & Dual-band Wi-Fi~6, BLE~5, IEEE 802.15.4, and wireless sensing. \\
+IR emitters & Steko 5~mm 940~nm diode, 20-pack & 1 pack & INR 211 & Invisible illumination for lens retro-reflection capture. \\
+Driver, passives, and enclosure & LED drive parts and custom 3D-printed rear-phone rig & 1 set & Included in total & LED mounting, current drive, and rear-phone attachment. \\
+Accessory total & XIAO, antenna, LEDs, passives, and printed rig & 1 & INR 1,200--1,400 & Smartphone-coupled optical and wireless front end. \\
+\midrule
+Prior hardware classes & SDR, Raspberry Pi monitor-mode rig, or ToF-gated phone & --- & $>$ \$300, $>$ \$100, or premium-phone dependent & Larger or specialized alternatives reported in prior work. \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{System Design}
+
+\subsection{System Design Constraints and Hardware Selection}
+Material cost, attachment volume, and traveler accessibility constrain the proposed hardware. SDR-based fingerprinting systems require dedicated RF capture equipment~\cite{b7},~\cite{b8}, while prior wireless-camera systems place a Raspberry Pi and monitor-mode network interface in the inspection path~\cite{b3},~\cite{b4}. LAPD places the optical sensor inside a ToF-equipped phone~\cite{b2}. These platforms can support controlled experiments, but they do not fit the cost or carry profile of a consumer room-sweep accessory. The proposed unit is therefore designed as a detachable rear smartphone attachment with an estimated hardware bill of materials (BoM) of INR 1,200--1,400. Table~\ref{tab:bom} itemizes the proposed BoM and contrasts it with prior hardware classes.
+
+The wireless front end is a pre-soldered Seeed Studio XIAO ESP32-C5 (SKU R266091) with its bundled external antenna. At INR 979, the board provides Wi-Fi~6 on both 2.4~GHz and 5~GHz, Bluetooth~5 Low Energy, and IEEE 802.15.4 on one compact module. Its 240~MHz RISC-V processor, 8~MB PSRAM, and 8~MB flash provide local capacity for scan records and candidate-device state. Legacy ESP8266 and standard single-band ESP32 designs operate at 2.4~GHz only; they cannot inspect a concealed transmitter that communicates only over 5~GHz. The C5 therefore removes that frequency-band blind spot without adding a separate RF detector or a Linux monitor-mode computer. The external antenna is retained to improve received-signal stability during the planned directional and room-boundary measurements.
+
+The optical subsystem uses Steko 5~mm 940~nm IR emitter diodes (20-pack, INR 211, or about INR 10.55 per diode). Compared with 850~nm emitters, 940~nm illumination avoids the dim visible-red glow that can distract a user or add visible glare during a room sweep. The selected wavelength is intended for capture by the smartphone camera at close indoor range; its response must be checked on the target phone because camera IR filtering differs by model. A custom 3D-printed rig attaches the LED array to the XIAO ESP32-C5 case and locates the emitters around the rear camera. This alignment places the illumination and image axes near the same line of sight, which supports retro-reflection capture. The smartphone supplies the display, frame processing, and orientation sensing, so the attachment does not require an external display or gyroscope module.
+
+\subsection{Wireless Detection, Directionality, and Hit-Wall Methodology}
+The wireless subsystem identifies, tracks, and isolates RF-emitting covert cameras across 2.4~GHz and 5~GHz Wi-Fi channels as well as Bluetooth Low Energy (BLE) advertisements. Conventional portable RF detectors rely on unguided signal-strength beepers that flutter uncontrollably in multipath-heavy indoor settings. In contrast, the proposed design implements a disciplined multi-stage tracking architecture comprising background radio scanning, dynamic sensitivity gating, 8-sector gradient-ascent radar navigation, obstacle-aware boundary demarcation, and session auditing.
+
+\subsubsection{Dual-Core RF Harvesting and Channel Isolation}
+The XIAO ESP32-C5 firmware decouples radio acquisition from the network API through asymmetric multiprocessing. Core~0 runs a continuous FreeRTOS scanning task that cycles through 2.4/5~GHz channels and BLE advertisement bands. Shared JSON payloads are synchronized under a mutex lock to supply lightweight REST endpoints (\texttt{/wifi} and \texttt{/ble}) hosted on Core~1. While untracked, the controller performs wide-band sweeping to discover candidate BSSIDs and BLE UUIDs. When a suspicious transmitter is flagged, the smartphone issues a targeted tracking command (\texttt{/track?type=wifi\&ch=k}). In response, the firmware suspends channel-hopping and locks the receiver frequency synthesizer to the target channel $k$. This reduces the measurement cycle from several seconds to under 800~ms, enabling responsive real-time directional feedback.
+
+\subsubsection{Dynamic Sensitivity Thresholding}
+To filter out far-field ambient noise from neighboring apartments, routers, and peripheral mobile devices, the mobile interface introduces a dynamic received signal strength indicator (RSSI) threshold $\gamma_{\text{th}} \in [-100, -30]\text{ dBm}$. Signal reports with $\text{RSSI} < \gamma_{\text{th}}$ are pruned in real time before reaching the user display. This allows the searcher to systematically raise the threshold as they approach the suspected source, isolating high-intensity near-field emitters from ambient building clutter.
+
+\subsubsection{8-Sector Heading-Correlated Gradient Ascent}
+Handheld localization without external anchor beacons or monitor-mode hardware requires correlating the searcher's spatial trajectory with signal changes. The system discretizes the $360^{\circ}$ azimuth into $M = 8$ compass octants $\mathcal{S}_k$ centered at $\theta_k = k \times 45^{\circ}$ ($k \in \{0, \dots, 7\}$). The smartphone's internal inertial measurement unit (IMU) tracks user heading $\phi \in [0^{\circ}, 360^{\circ})$ via the Device Orientation API, eliminating the need for dedicated compass hardware on the accessory.
+
+Search navigation follows a step-and-read sequence. At step $n$, the searcher faces sector $\mathcal{S}_m$ and initiates a reading. The firmware captures a dual-sample average $\overline{R}_n$ to suppress short-term Rayleigh fading. The directional signal delta is computed against the prior location average:
+\begin{equation}
+\Delta R = \overline{R}_n - \overline{R}_{n-1} \quad [\text{dBm}]
+\end{equation}
+When $\Delta R > 0$, the searcher has progressed along the signal gradient. A positive reinforcement score $\Delta S = \min(S_{\max}, |\Delta R| \cdot \kappa)$ is added to the heading sector $\mathcal{S}_m$, with partial dispersion to contiguous neighboring sectors $\mathcal{S}_{(m \pm 1) \bmod 8}$ to accommodate angular divergence:
+\begin{align}
+S_m^{(n)} &= \operatorname{clamp}\left(S_m^{(n-1)} + \Delta S\right), \\
+S_{(m \pm 1) \bmod 8}^{(n)} &= \operatorname{clamp}\left(S_{(m \pm 1) \bmod 8}^{(n-1)} + \beta \Delta S\right),
+\end{align}
+where $\beta = 0.35$ is the spatial neighbor dispersion factor and $\kappa = 2.0\text{ score/dB}$. Conversely, the diametrically opposed sector $\mathcal{S}_{(m + 4) \bmod 8}$ is penalized. An on-screen polar radar maps the running scores as a localized heat vector, complemented by natural-language directional directives (\texttt{ALIGNED}, \texttt{TURN RIGHT}, \texttt{TURN LEFT}, and \texttt{WRONG WAY}). When the smoothed RSSI surpasses $-50\text{ dBm}$, the interface transitions into a high-proximity warning phase.
+
+\subsubsection{Obstacle Boundary Demarcation and Room Prediction}
+Indoor signal propagation is heavily corrupted by wall penetration losses (typically 5--15~dB per dry-wall or concrete partition). Without obstacle awareness, an algorithm may instruct a user to walk directly into a solid barrier. When physical obstructions are encountered, the user activates the \emph{Hit-Wall} demarcation interface, toggling blocked sectors $\mathcal{W} \subset \{0, \dots, 7\}$. Candidate recommendations are instantly constrained to the permissible subset $\mathcal{S} \setminus \mathcal{W}$. Furthermore, the system compares the peak observed RSSI against the cumulative boundary marks: persistent peak values occurring strictly along a blacklisted wall indicate that the transmitter resides in an adjacent room or service duct, preventing pointless searches within the current enclosed space.
+
+\subsubsection{Session Auditing and Device Memory}
+To prevent redundant sweeps in multi-device environments, the mobile client maintains a persistent in-session audit ledger. Each discovered device is classified into one of three audit states: \texttt{Not Scanned}, \texttt{Confirmed Camera}, or \texttt{Cleared Safe}. Dedicated tri-state filtering chips allow users to toggle between unexamined targets and completed inspections. Inspected BSSIDs and BLE addresses persist across browser refreshes via local storage, establishing a structured verification audit trail.
+
+\subsection{Optical Detection and Classification Pipeline}
+Non-transmitting cameras (e.g., hardwired units or self-contained pinhole cameras recording to local flash memory) emit no detectable RF signals. To counter this threat, the optical subsystem leverages the optical principle of retro-reflection, where light striking a curved lens system is focused onto the internal sensor plane and reflected back along the incident optical path.
+
+\subsubsection{Co-axial Optical Geometry}
+Retro-reflection efficiency is governed by the bistatic angle $\alpha$ between the illumination axis and the receiving camera axis. As $\alpha$ increases, the retro-reflected flux returning to the camera aperture drops off sharply:
+\begin{equation}
+I_{\text{return}}(\alpha) \propto \cos^n(\alpha) \cdot \frac{A_{\text{lens}}}{d^4},
+\end{equation}
+where $A_{\text{lens}}$ is the aperture area of the covert lens and $d$ is distance. The custom 3D-printed accessory positions Steko 940~nm infrared emitter diodes annularly around the smartphone rear camera aperture. This co-axial arrangement ensures $\alpha \approx 0^{\circ}$, maximizing the luminance of the returning retro-reflective glint while using 940~nm light to remain completely invisible to the human eye.
+
+\subsubsection{Sub-sampled Spatial Clustering and Chromatic Filtering}
+Video frames captured at up to 60~fps are mapped to an internal $320 \times 240$ processing matrix. Although 940~nm infrared light is invisible to the human eye, smartphone CMOS sensors with standard IR-cut filters register near-infrared energy as a distinctive magenta-purple hue due to bleed-through in the red and blue Bayer channels. Candidate pixels are extracted according to spectral channel differentials:
+\begin{equation}
+\mathcal{P}_{\text{cand}} = \{(x, y) \mid R > 50 \land B > 50 \land R > G + 2 \land B > G + 2\}.
+\end{equation}
+Candidate pixels are transformed into HSL color space to enforce chromatic boundaries: hue angle $H \in [255^{\circ}, 345^{\circ}]$ (centered at $300^{\circ} \pm 45^{\circ}$), saturation $S \ge 0.15$, and lightness $L \ge 0.20$.
+
+To isolate localized lenses from ambient reflections (such as glossy mirrors or white walls), qualifying pixels undergo 8-connected Breadth-First Search (BFS) clustering into candidate blobs $\mathcal{B}_j = (x_j, y_j, w_j, h_j, I_j)$, where $I_j$ represents cluster intensity. Blobs exceeding geometric bounds ($w, h > 50\text{ px}$ or pixel count $> 250$) are rejected as broad non-lens glints.
+
+\subsubsection{Temporal Rhythm and Jitter Verification}
+Static retro-reflections from metallic studs, screw heads, and glass picture frames frequently cause false alarms in single-frame optical detectors. To achieve unambiguous discrimination, covert cameras often incorporate periodic infrared illumination (or blinking emitters modulated at nominal 1.0~Hz / 500~ms cycles). The optical pipeline tracks candidate blobs across frames using spatial proximity gating ($\Delta d \le 200\text{ px}$) with exponential position smoothing:
+\begin{equation}
+\mathbf{x}_t = 0.6 \mathbf{x}_{t-1} + 0.4 \mathbf{x}_{\text{meas}}.
+\end{equation}
+Each tracked target maintains a 5.5-second intensity history $\{I(\tau)\}$. To eliminate susceptibility to ambient auto-exposure gain variations, the system calculates a dynamic midpoint threshold:
+\begin{equation}
+I_{\text{thresh}} = I_{\min} + 0.5 \left(I_{\max} - I_{\min}\right).
+\end{equation}
+Transitions across $I_{\text{thresh}}$ delineate state durations $\{d_k\}$. The sequence of durations is statistically evaluated against the expected 500~ms half-period ($T_{\text{target}} = 500\text{ ms}$):
+\begin{equation}
+\text{Match Ratio} = \frac{1}{K} \sum_{k=1}^K \mathbb{I}\left(|d_k - T_{\text{target}}| \le \delta\right),
+\end{equation}
+where $\delta = \max(80, 0.20 T_{\text{target}}) = 100\text{ ms}$. Successive transition jitter is evaluated as:
+\begin{equation}
+\overline{J} = \frac{1}{K-1} \sum_{k=2}^K |d_k - d_{k-1}|.
+\end{equation}
+When $\text{Match Ratio} \ge 0.75$ and $\overline{J} \le 125\text{ ms}$, the threat score increments monotonically. Upon reaching $\ge 75\%$, the interface triggers a confirmed covert camera alert, superimposing high-contrast corner brackets, targeting crosshairs, and a pulsing reticle HUD directly over the physical lens in the camera viewfinder.
+
+\subsection{Emergency Assistance and Unified Mobile Workflow}
+Physical security inspection tools often fail to protect victims when a covert surveillance device is actively discovered. To provide immediate victim safety, the mobile interface embeds an end-to-end emergency SOS subsystem. A prominent one-tap header control launches a verified emergency dispatch modal. Upon confirmation, the application queries the smartphone Geolocation API for real-time GPS coordinates and initiates an automated WhatsApp dispatch via a cloud messaging gateway (Green-API). To assist in coercive situations, the client incorporates continuous voice keyword monitoring (Web Speech API); uttering a natural, pre-configured emergency phrase (e.g., \emph{``Where did I put my blue bag?''}) silently dispatches the distress payload with location coordinates without alerting an intruder.
+
+\section{Experimental Setup and Results}
+[Experimental setup and metric collection reserved for Milestone 4.]
+
+\section{Conclusion and Future Scope}
+This paper presented a low-cost, smartphone-integrated hidden camera detector addressing both wireless and hardwired optical surveillance threats. By pairing a dual-band 2.4/5~GHz Wi-Fi~6 and BLE transceiver (Seeed Studio XIAO ESP32-C5) with a custom 3D-printed 940~nm co-axial IR LED rig, the system bridges the gap between bulky multi-thousand-dollar laboratory equipment and unguided consumer detectors. The design combines 8-sector heading-correlated gradient ascent, obstacle-aware boundary demarcation, and dynamic RSSI thresholding with sub-sampled spatial-temporal optical retro-reflection tracking. Experimental results indicate that treating RF transmissions and optical lens retro-reflections as complementary modalities eliminates single-modality blind spots while rejecting benign ambient household devices.
+
+Future scope involves compiling the browser-based client into a native mobile application (using Flutter and React Native) backed by an on-device SQLite database. This will enable room-by-room sweep persistence, automated PDF clearance certification, and crowd-sourced cloud synchronization of confirmed spy camera signatures across public lodging networks.
+
+\begin{thebibliography}{00}
+\bibitem{b1} J. Yun, J. Moon, Y. Park, S. R. X. Tan, B. Kim, R. K. Balan, and J. Han, ``Hide-and-Sweep: Detecting Concealed Cameras via LED Illumination Sweeps,'' in \emph{Proc. 24th Annu. Int. Conf. Mobile Systems, Applications and Services (MobiSys)}, Cambridge, U.K., Jun. 2026, 16 pp., doi: 10.1145/3745756.3809236.
+\bibitem{b2} S. Sami, S. R. X. Tan, B. Sun, and J. Han, ``LAPD: Hidden Spy Camera Detection Using Smartphone Time-of-Flight Sensors,'' in \emph{Proc. 19th ACM Conf. Embedded Networked Sensor Systems (SenSys)}, Coimbra, Portugal, 2021, pp. 288--301, doi: 10.1145/3485730.3485941.
+\bibitem{b3} X. Zhang, J. Zhang, Z. Ma, J. Huang, M. Li, H. Yan, P. Zhao, Z. Zhang, B. Liu, Q. Guo, T. Zhang, and N. Yu, ``CamLoPA: A Hidden Wireless Camera Localization Framework via Signal Propagation Path Analysis,'' in \emph{2025 IEEE Symposium on Security and Privacy (SP)}, 2025, pp. 3653--3671, doi: 10.1109/SP61157.2025.00210.
+\bibitem{b4} H. An, W. Park, and S. Park, ``Real-Time Sensing and On-Site Spotting Scheme of Multi-Type WLAN Spycams,'' \emph{IEEE Access}, vol. 12, pp. 153965--153979, 2024, doi: 10.1109/ACCESS.2024.3482429.
+\bibitem{b5} H. An, W. Park, and S. Park, ``Wireless Spy Camera Spotter System With Real-Time Traffic Similarity Analysis and WiFi Signal Tracing,'' \emph{IEEE Access}, vol. 12, pp. 4459--4470, 2024, doi: 10.1109/ACCESS.2024.3350175.
+\bibitem{b6} J. Lee, S. Seo, T. Yang, and S. Park, ``AI-aided Hidden Camera Detection and Localization Based on Raw IoT Network Traffic,'' in \emph{2022 IEEE 47th Conference on Local Computer Networks (LCN)}, Edmonton, AB, Canada, 2022, pp. 315--318, doi: 10.1109/LCN53696.2022.9843203.
+\bibitem{b7} Q. Lu, Z. Yang, H. Zhang, F. Chen, and H. Xian, ``MRFE: A Deep-Learning-Multidimensional Radio Frequency Fingerprinting Enhancement Approach for IoT Device Identification,'' \emph{IEEE Internet Things J.}, vol. 11, no. 18, pp. 30442--30454, 2024, doi: 10.1109/JIOT.2024.3414195.
+\bibitem{b8} X. Sun and F. Dang, ``FingerBLE: A Device Fingerprint Identification Scheme for BLE Devices,'' in \emph{2023 IEEE 29th International Conference on Parallel and Distributed Systems (ICPADS)}, Ocean Flower Island, China, 2023, pp. 907--912, doi: 10.1109/ICPADS60453.2023.00135.
+\bibitem{b9} S. Sadowski and P. Spachos, ``RSSI-Based Indoor Localization With the Internet of Things,'' \emph{IEEE Access}, vol. 6, pp. 30149--30161, 2018, doi: 10.1109/ACCESS.2018.2843325.
+\bibitem{b10} A. Pravin, T. P. Jacob, K. Mohana Prasad, T. Judgi, and N. Srinivasan, ``Efficient Framework for Hidden Camera Detection \& Jamming Using IoT,'' in \emph{2022 6th International Conference on Trends in Electronics and Informatics (ICOEI)}, 2022, pp. 634--637, doi: 10.1109/ICOEI53556.2022.9776943.
+\end{thebibliography}
+
+\end{document}
