@@ -11,6 +11,8 @@
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
 #include <esp_idf_version.h>
+#include <esp_wifi.h>
+#include <utility>
 
 const char* phoneHotspotSsid = "hello";
 const char* phoneHotspotPassword = "12345678";
@@ -30,6 +32,196 @@ TaskHandle_t scanTaskHandle = NULL;
 volatile uint8_t trackMode = 0;
 volatile uint8_t trackChannel = 0;
 
+enum class DeepScanState { Idle, Pending, Running, Done, Failed };
+DeepScanState deepScanState = DeepScanState::Idle; // Protected by jsonMutex.
+String deepScanJson = "[]";
+const char* deepScanError = nullptr;
+bool deepScanHomeOnly = false;
+
+struct DeepScanClient {
+  uint8_t mac[6];
+  uint8_t bssid[6];
+  uint8_t channel;
+  int8_t rssi;
+  uint32_t uplinkPackets;
+  uint32_t uplinkBytes;
+};
+
+portMUX_TYPE deepScanMux = portMUX_INITIALIZER_UNLOCKED;
+DeepScanClient deepScanClients[64];
+size_t deepScanClientCount = 0;
+uint8_t deepScanOwnMac[6];
+bool deepScanAccepting = false;
+
+bool isUnicastMac(const uint8_t* mac) {
+  const uint8_t zero[6] = {};
+  return !(mac[0] & 1) && memcmp(mac, zero, 6) != 0;
+}
+
+void captureDeepScanClient(void* buffer, wifi_promiscuous_pkt_type_t type) {
+  if (type != WIFI_PKT_DATA) return;
+  const auto* packet = static_cast<const wifi_promiscuous_pkt_t*>(buffer);
+  if (packet->rx_ctrl.channel < 1 || packet->rx_ctrl.channel > 13) return;
+  if (packet->rx_ctrl.sig_len < 28) return; // Data header plus FCS.
+  const uint8_t* frame = packet->payload;
+  const uint8_t direction = frame[1] & 3;
+  if (direction != 1 && direction != 2) return;
+
+  const bool uplink = direction == 1;
+  const uint8_t* mac = frame + (uplink ? 10 : 4);
+  const uint8_t* bssid = frame + (uplink ? 4 : 10);
+  if (!isUnicastMac(mac) || !isUnicastMac(bssid)) return;
+
+  portENTER_CRITICAL(&deepScanMux);
+  if (deepScanAccepting && memcmp(mac, deepScanOwnMac, 6) != 0) {
+    size_t index = 0;
+    while (index < deepScanClientCount &&
+           (memcmp(deepScanClients[index].mac, mac, 6) != 0 ||
+            memcmp(deepScanClients[index].bssid, bssid, 6) != 0)) {
+      ++index;
+    }
+    if (index < sizeof(deepScanClients) / sizeof(deepScanClients[0])) {
+      auto& client = deepScanClients[index];
+      if (index == deepScanClientCount) {
+        client = {};
+        memcpy(client.mac, mac, 6);
+        memcpy(client.bssid, bssid, 6);
+        ++deepScanClientCount;
+        client.rssi = -128;
+      }
+      client.channel = packet->rx_ctrl.channel;
+      // Downlink RSSI measures the access point, not the client.
+      if (uplink) {
+        client.rssi = packet->rx_ctrl.rssi;
+        ++client.uplinkPackets;
+        client.uplinkBytes += packet->rx_ctrl.sig_len;
+      }
+    }
+  }
+  portEXIT_CRITICAL(&deepScanMux);
+}
+
+const char* runDeepScan(String& results, bool& homeOnly) {
+  uint8_t homeChannel;
+  wifi_second_chan_t homeSecondary;
+  wifi_country_t country;
+  if (WiFi.status() != WL_CONNECTED) return "Connect the ESP32 to the hotspot first.";
+  if (esp_wifi_get_channel(&homeChannel, &homeSecondary) != ESP_OK ||
+      esp_wifi_get_mac(WIFI_IF_STA, deepScanOwnMac) != ESP_OK) {
+    return "Deep Scan could not read the Wi-Fi radio settings.";
+  }
+  const bool countryAvailable = esp_wifi_get_country(&country) == ESP_OK;
+
+  wifi_promiscuous_filter_t filter = {WIFI_PROMIS_FILTER_MASK_DATA};
+  if (esp_wifi_set_promiscuous_filter(&filter) != ESP_OK ||
+      esp_wifi_set_promiscuous_rx_cb(captureDeepScanClient) != ESP_OK ||
+      esp_wifi_set_promiscuous(true) != ESP_OK) return "Deep Scan could not start Wi-Fi listening.";
+
+  portENTER_CRITICAL(&deepScanMux);
+  deepScanClientCount = 0;
+  deepScanAccepting = true;
+  portEXIT_CRITICAL(&deepScanMux);
+
+  const bool homeIs24GHz = homeChannel >= 1 && homeChannel <= 13;
+  bool visitedOtherChannel = false;
+  bool restored = true;
+  if (countryAvailable) {
+    for (int channel = country.schan; channel < country.schan + country.nchan && channel <= 13; ++channel) {
+      if (channel < 1 || channel == homeChannel) continue;
+      if (esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE) != ESP_OK) continue;
+      visitedOtherChannel = true;
+      vTaskDelay(pdMS_TO_TICKS(300));
+      restored = esp_wifi_set_channel(homeChannel, homeSecondary) == ESP_OK;
+      if (!restored) break;
+      vTaskDelay(pdMS_TO_TICKS(120));
+    }
+  }
+  if (homeIs24GHz && restored) vTaskDelay(pdMS_TO_TICKS(visitedOtherChannel ? 400 : 2000));
+  homeOnly = !visitedOtherChannel && homeIs24GHz;
+
+  portENTER_CRITICAL(&deepScanMux);
+  deepScanAccepting = false;
+  portEXIT_CRITICAL(&deepScanMux);
+  const esp_err_t stopResult = esp_wifi_set_promiscuous(false);
+  if (!restored || WiFi.status() != WL_CONNECTED) {
+    // Rejoin the configured hotspot if the radio could not return to its channel.
+    WiFi.reconnect();
+  }
+  if (stopResult != ESP_OK) return "Deep Scan could not stop Wi-Fi listening.";
+  if (!visitedOtherChannel && !homeIs24GHz) {
+    return "No 2.4 GHz channel was available. Set the hotspot to 2.4 GHz and reconnect.";
+  }
+
+  if (!results.concat('[')) return "Deep Scan ran out of memory while preparing results.";
+  for (size_t i = 0; i < deepScanClientCount; ++i) {
+    const auto& client = deepScanClients[i];
+    char entry[160];
+    char rssi[8] = "null";
+    if (client.uplinkPackets) snprintf(rssi, sizeof(rssi), "%d", client.rssi);
+    snprintf(entry, sizeof(entry),
+             "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"bssid\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
+             "\"channel\":%u,\"rssi\":%s,\"uplinkPackets\":%lu,\"uplinkBytes\":%lu}",
+             client.mac[0], client.mac[1], client.mac[2], client.mac[3], client.mac[4], client.mac[5],
+             client.bssid[0], client.bssid[1], client.bssid[2], client.bssid[3], client.bssid[4], client.bssid[5],
+             client.channel, rssi, (unsigned long)client.uplinkPackets, (unsigned long)client.uplinkBytes);
+    if ((results.length() > 1 && !results.concat(',')) || !results.concat(entry)) {
+      return "Deep Scan ran out of memory while preparing results.";
+    }
+  }
+  return results.concat(']') ? nullptr : "Deep Scan ran out of memory while preparing results.";
+}
+
+bool processDeepScan() {
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  const bool pending = deepScanState == DeepScanState::Pending;
+  if (pending) deepScanState = DeepScanState::Running;
+  xSemaphoreGive(jsonMutex);
+  if (!pending) return false;
+
+  String results;
+  bool homeOnly = false;
+  const char* error = trackMode == 0 ? runDeepScan(results, homeOnly) : "End device tracking and try again.";
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  deepScanJson = std::move(results);
+  deepScanError = error;
+  deepScanHomeOnly = homeOnly;
+  deepScanState = error ? DeepScanState::Failed : DeepScanState::Done;
+  xSemaphoreGive(jsonMutex);
+  return true;
+}
+
+void handleDeepScanStart() {
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  const bool busy = deepScanState == DeepScanState::Pending || deepScanState == DeepScanState::Running;
+  xSemaphoreGive(jsonMutex);
+  if (trackMode != 0 || busy) {
+    server.send(409, "application/json", "{}");
+    return;
+  }
+  server.send(202, "application/json", "{}");
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  deepScanState = DeepScanState::Pending;
+  xSemaphoreGive(jsonMutex);
+}
+
+void handleDeepScanResults() {
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  const auto state = deepScanState;
+  const char* error = deepScanError;
+  const bool homeOnly = deepScanHomeOnly;
+  String results = "[]";
+  if (state == DeepScanState::Done) results = deepScanJson;
+  xSemaphoreGive(jsonMutex);
+  const bool busy = state == DeepScanState::Pending || state == DeepScanState::Running;
+  server.sendHeader("Cache-Control", "no-store");
+  if (state == DeepScanState::Failed) {
+    server.send(503, "text/plain", error);
+    return;
+  }
+  if (state == DeepScanState::Done && homeOnly) server.sendHeader("X-Deep-Scan-Scope", "hotspot");
+  server.send(busy ? 202 : 200, "application/json", results);
+}
+
 const uint8_t IR_LED_PIN = 23; // GPIO23 (D6 on this board)
 
 void irLedBlinkTask(void* parameter) {
@@ -46,6 +238,10 @@ void scanTask(void* parameter) {
   uint32_t localScanId = 0;
   TickType_t lastCycleStart = xTaskGetTickCount();
   for (;;) {
+    if (processDeepScan()) {
+      lastCycleStart = xTaskGetTickCount();
+      continue;
+    }
     const uint32_t currentScanId = ++localScanId;
     const uint8_t mode = trackMode;
     const uint8_t ch = trackChannel;
@@ -357,6 +553,15 @@ const char index_html[] PROGMEM = R"rawliteral(
     .signal-tab-pane { display: none; }
     .signal-tab-pane.active { display: block; }
     .signal-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+    .deep-scan-panel { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-color); }
+    .deep-scan-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+      justify-content: space-between; }
+    .deep-scan-heading h3 { margin: 0; font-size: .88rem; }
+    .deep-scan-status { margin: 8px 0; color: var(--text-muted); font-size: .78rem; line-height: 1.4; }
+    .deep-scan-results { padding: 0; margin: 0; list-style: none; }
+    .deep-scan-result { padding: 9px 12px; border: 1px solid var(--border-color);
+      border-radius: 12px; background: #fff7fa; overflow-wrap: anywhere; font-size: .82rem; }
+    .deep-scan-flag { display: block; margin-top: 4px; color: var(--text-main); font-size: .72rem; }
     .signal-item { display: flex; align-items: center; gap: 10px; background-color: #fff7fa;
       border: 1px solid var(--border-color); border-radius: 12px; padding: 9px 12px; }
     .signal-icon { font-size: 1.1rem; flex-shrink: 0; }
@@ -488,6 +693,14 @@ const char index_html[] PROGMEM = R"rawliteral(
         <div class="signal-tab-pane" id="paneBle">
           <div class="signal-list" id="bleList"><div class="empty-state"><span>🔵</span>Connect to ESP32 to scan</div></div>
         </div>
+        <section class="deep-scan-panel" aria-labelledby="deepScanTitle">
+          <div class="deep-scan-heading">
+            <h3 id="deepScanTitle">Deep Scan Results</h3>
+            <button class="rbtn" id="btnDeepScan" type="button">Scan 2.4 GHz clients</button>
+          </div>
+          <p class="deep-scan-status" id="deepScanStatus" role="status">Listen for devices connected to nearby Wi-Fi networks.</p>
+          <ul class="signal-list deep-scan-results" id="deepScanResults"></ul>
+        </section>
       </div>
 
       <!-- Radar + ONE instruction -->
@@ -621,8 +834,8 @@ const char index_html[] PROGMEM = R"rawliteral(
 
   <script>
     // ─── Green API Credentials ────────────────────────────────────────────────
-    const GREEN_API_INSTANCE = '710722748361';
-    const GREEN_API_TOKEN    = '303c9adf18e54cb3bce3236cec65758a6c457dacf91246a89e';
+    const GREEN_API_INSTANCE = 'ENTER_INSTANCE_ID_HERE';
+    const GREEN_API_TOKEN    = 'ENTER_API_KEY_HERE';
 
     const KEY_NAME     = 'aegis_user_name';
     const KEY_CONTACT  = 'aegis_emergency_contact';
@@ -2245,6 +2458,96 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     // ─── Fetch from ESP32 ─────────────────────────────────────────────────────
+    const btnDeepScan = $('btnDeepScan');
+    const deepScanStatus = $('deepScanStatus');
+    const deepScanResults = $('deepScanResults');
+
+    async function fetchDeepScan(url, method = 'GET') {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2500);
+      try {
+        const response = await fetch(url, { method, signal: controller.signal, cache: 'no-store' });
+        if (response.status === 409) throw new Error('Deep Scan is busy or a device is being tracked.');
+        if (response.status === 503) throw new Error(await response.text());
+        if (!response.ok) throw new Error('Deep Scan request failed (HTTP ' + response.status + ').');
+        if (response.status === 202) return null;
+        return {
+          clients: await response.json(),
+          hotspotOnly: response.headers.get('X-Deep-Scan-Scope') === 'hotspot'
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    btnDeepScan.addEventListener('click', async () => {
+      if (!isConnected || !espBaseUrl) {
+        deepScanStatus.textContent = 'Connect to the ESP32 first.';
+        return;
+      }
+      if (target || scanInFlight) {
+        deepScanStatus.textContent = 'Wait for the current scan or tracking session to finish, then try again.';
+        return;
+      }
+
+      const baseUrl = espBaseUrl;
+      const networkNames = new Map(lastWifiData.map(ap => [String(ap.bssid).toUpperCase(), ap.ssid]));
+      scanInFlight = true;
+      btnDeepScan.disabled = true;
+      btnDeepScan.textContent = 'Scanning…';
+      $('wifiList').inert = true;
+      $('bleList').inert = true;
+      deepScanResults.replaceChildren();
+      deepScanStatus.textContent = 'Listening for Wi-Fi clients…';
+      try {
+        await fetchDeepScan(baseUrl + '/deepscan', 'POST');
+        const deadline = Date.now() + 30000;
+        let result = null;
+        while (Date.now() < deadline && result === null) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (!isConnected || espBaseUrl !== baseUrl) throw new Error('ESP32 connection changed.');
+          try {
+            result = await fetchDeepScan(baseUrl + '/deepscan');
+          } catch (error) {
+            if (error.name !== 'AbortError' && !(error instanceof TypeError)) throw error;
+          }
+        }
+        if (result === null) throw new Error('Deep Scan timed out. Check the ESP32 connection and try again.');
+        const { clients, hotspotOnly } = result;
+        for (const client of clients) {
+          const item = document.createElement('li');
+          item.className = 'deep-scan-result';
+          const network = networkNames.get(client.bssid) || client.bssid;
+          const signal = client.rssi === null ? 'client signal unavailable' : client.rssi + ' dBm';
+          const address = document.createElement('strong');
+          address.textContent = client.mac;
+          const metadata = document.createElement('div');
+          metadata.className = 'signal-meta';
+          metadata.textContent = network + ' · Channel ' + client.channel + ' · ' + signal;
+          item.append(address, metadata);
+          if (client.uplinkPackets >= 4 || client.uplinkBytes >= 1500) {
+            const flag = document.createElement('span');
+            flag.className = 'deep-scan-flag';
+            flag.textContent = 'Inspect · ' + client.uplinkPackets + ' outgoing frames, ' + client.uplinkBytes + ' bytes';
+            item.append(flag);
+          }
+          deepScanResults.appendChild(item);
+        }
+        const coverage = hotspotOnly ? 'Hotspot channel only. ' : '';
+        deepScanStatus.textContent = coverage + (clients.length
+          ? clients.length + ' client connections heard. Traffic alone cannot identify a camera.'
+          : 'No client traffic heard during this scan.');
+      } catch (error) {
+        deepScanStatus.textContent = error.message;
+      } finally {
+        $('wifiList').inert = false;
+        $('bleList').inert = false;
+        btnDeepScan.disabled = false;
+        btnDeepScan.textContent = 'Scan 2.4 GHz clients';
+        scanInFlight = false;
+      }
+    });
+
     async function fetchSignalArray(url) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -2406,6 +2709,8 @@ void setup() {
 
   server.on("/", handleRoot);
   server.on("/wifi", handleWifi);
+  server.on("/deepscan", HTTP_POST, handleDeepScanStart);
+  server.on("/deepscan", HTTP_GET, handleDeepScanResults);
   server.on("/ble", handleBLE);
   server.on("/pir-status", handlePIR);
   server.on("/trigger-whatsapp", handleWhatsApp);
