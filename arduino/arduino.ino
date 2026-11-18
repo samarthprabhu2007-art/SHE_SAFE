@@ -435,6 +435,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       border: 1px dashed var(--border-color); border-radius: 12px; display: flex; flex-direction: column;
       align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; margin: 0 auto; }
     .canvas-placeholder.camera-active { max-width: 640px; max-height: none; position: relative; overflow: hidden; }
+    #blinkResult[hidden] { display: none; }
     #detectionOverlay { display: none; position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
       background-color: rgba(16,185,129,.15); color: var(--accent-green); border-radius: 20px;
@@ -633,6 +634,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       <button class="sos-btn" id="sosBtn">🚨 <span>SOS</span></button>
     </div>
   </header>
+  <p id="locationNotice" role="status" hidden style="margin:8px 16px;font-size:.8rem;line-height:1.4;"></p>
 
   <div class="mode-switch-container">
     <div class="mode-switcher">
@@ -759,7 +761,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           <div id="cameraPlaceholder" style="display:flex; flex-direction:column; align-items:center; gap:8px;">
             <span style="font-size:2rem;">📷</span>
             <span>IR Lens Blink Detector</span>
-            <span style="font-size:.75rem; color:var(--text-muted);">(480×360 Client-Side Computer Vision)</span>
+            <span style="font-size:.75rem; color:var(--text-muted);">(Camera-based infrared light analysis)</span>
           </div>
         </div>
         <div style="display:flex; gap:10px; margin-top:12px;">
@@ -767,12 +769,11 @@ const char index_html[] PROGMEM = R"rawliteral(
           <button class="btn btn-secondary" id="simulationToggleBtn" style="flex:1;" disabled>Run Demo Blink</button>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">IR LED Blink Verification</div>
+      <div class="card" id="blinkResult">
+        <div class="card-title">Blink verification</div>
         <div style="font-size:.85rem; color:var(--text-muted);">
-          Blink Match: <strong id="blinkScore" style="color:var(--text-main);">0%</strong>
+          Blink Match: <strong id="blinkScore">0%</strong>
           <span id="blinkStatus">(No optical target detected)</span>
-          <div style="margin-top:6px; font-size:.75rem;">Expected pattern: 500 ms on / 500 ms off (1 Hz)</div>
         </div>
       </div>
     </div>
@@ -808,7 +809,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <div class="modal-overlay" id="sosModal">
     <div class="modal-box">
       <h2>🚨 Trigger Emergency SOS?</h2>
-      <p>This will fetch your live GPS location and send an immediate WhatsApp alert to emergency contacts.</p>
+      <p>This tries to acquire your location up to three times, then sends the SOS with your location or the reason it was unavailable.</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" id="sosCancel">Cancel</button>
         <button class="btn btn-danger" id="sosConfirm">Send Alert</button>
@@ -829,6 +830,8 @@ const char index_html[] PROGMEM = R"rawliteral(
       <input type="tel" id="inputContact" value="+917406531222" readonly style="opacity:.6; cursor:not-allowed; background:#fff7fa;">
       <small style="color:var(--text-muted); font-size:.72rem;">Pre-configured. Cannot be changed.</small>
     </div>
+    <button class="btn btn-secondary" id="checkLocation" style="width:100%;">Check Location</button>
+    <p id="locationDiagnostics" role="status" style="font-size:.8rem;overflow-wrap:anywhere;"></p>
     <button class="btn btn-danger" id="saveSettings" style="width:100%; margin-top:8px;">Save</button>
   </div>
 
@@ -886,20 +889,18 @@ const char index_html[] PROGMEM = R"rawliteral(
       hueCenter: 300,
       hueTolerance: 45,
       minSaturation: 0.15,
-      minLightness: 0.20,
+      minLightness: 0.12,
       blinkRateTarget: 500, // 500 ms target
-      sensitivity: 6
     };
 
-    const GRID_W = 320;
-    const GRID_H = 240;
+    let GRID_W = 640;
+    let GRID_H = 480;
     processingCanvas.width = GRID_W;
     processingCanvas.height = GRID_H;
 
     let isSimulating = false;
-    let simAngle = 0;
     let simBlinkState = true;
-    let lastSimBlinkTime = Date.now();
+    let lastSimBlinkTime = performance.now();
 
     let trackedTargets = [];
     let nextTargetId = 1;
@@ -925,79 +926,70 @@ const char index_html[] PROGMEM = R"rawliteral(
       return [h * 360, s, l];
     };
 
-    const findBlobs = (pixels) => {
-      if (pixels.length === 0) return [];
-      
-      const visited = new Set();
+
+    let opticalMask = new Uint8Array(GRID_W * GRID_H);
+    let opticalIntensity = new Float32Array(GRID_W * GRID_H);
+    let opticalQueue = new Int32Array(GRID_W * GRID_H);
+    let lastVideoTime = -1;
+    let lastOpticalTime = 0;
+    let videoFrameCallback = false;
+
+    const findBlobs = () => {
       const blobs = [];
-      const pixelGrid = {};
-      pixels.forEach(p => {
-        pixelGrid[`${p.x},${p.y}`] = p;
-      });
-
-      pixels.forEach(p => {
-        const key = `${p.x},${p.y}`;
-        if (visited.has(key)) return;
-
-        const queue = [p];
-        visited.add(key);
-        
-        let minX = p.x, maxX = p.x;
-        let minY = p.y, maxY = p.y;
-        let sumX = 0, sumY = 0;
-        let sumIntensity = 0;
-        let pCount = 0;
-
-        while (queue.length > 0) {
-          const curr = queue.shift();
-          sumX += curr.x;
-          sumY += curr.y;
-          sumIntensity += curr.intensity;
-          pCount++;
-
-          if (curr.x < minX) minX = curr.x;
-          if (curr.x > maxX) maxX = curr.x;
-          if (curr.y < minY) minY = curr.y;
-          if (curr.y > maxY) maxY = curr.y;
-
-          for (let dx = -4; dx <= 4; dx += 2) {
-            for (let dy = -4; dy <= 4; dy += 2) {
-              if (dx === 0 && dy === 0) continue;
-              const nx = curr.x + dx;
-              const ny = curr.y + dy;
-              const nKey = `${nx},${ny}`;
-              
-              if (pixelGrid[nKey] && !visited.has(nKey)) {
-                visited.add(nKey);
-                queue.push(pixelGrid[nKey]);
-              }
+      for (let seed = 0; seed < opticalMask.length; seed++) {
+        if (!opticalMask[seed]) continue;
+        let head = 0, tail = 1;
+        opticalQueue[0] = seed;
+        opticalMask[seed] = 0;
+        let minX = GRID_W, minY = GRID_H, maxX = 0, maxY = 0;
+        let sumX = 0, sumY = 0, intensity = 0;
+        while (head < tail) {
+          const index = opticalQueue[head++];
+          const x = index % GRID_W, y = Math.floor(index / GRID_W);
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+          sumX += x; sumY += y; intensity += opticalIntensity[index];
+          for (let ny = Math.max(0, y - 1); ny <= Math.min(GRID_H - 1, y + 1); ny++) {
+            for (let nx = Math.max(0, x - 1); nx <= Math.min(GRID_W - 1, x + 1); nx++) {
+              const neighbour = ny * GRID_W + nx;
+              if (!opticalMask[neighbour]) continue;
+              opticalMask[neighbour] = 0;
+              opticalQueue[tail++] = neighbour;
             }
           }
         }
-
-        const minSize = Math.max(1, 11 - config.sensitivity); 
-        const maxSize = 250;
-        const maxDim = 50;
-        const blobW = (maxX - minX) + 1;
-        const blobH = (maxY - minY) + 1;
-        if (pCount >= minSize && pCount <= maxSize && blobW <= maxDim && blobH <= maxDim) {
-          blobs.push({
-            x: minX,
-            y: minY,
-            w: blobW,
-            h: blobH,
-            cx: sumX / pCount,
-            cy: sumY / pCount,
-            intensity: sumIntensity / pCount,
-            size: pCount
-          });
+        const w = maxX - minX + 1, h = maxY - minY + 1;
+        if (tail >= 2 && tail <= 1000 && w <= 80 && h <= 80) {
+          blobs.push({ x: minX, y: minY, w, h, cx: sumX / tail,
+            cy: sumY / tail, intensity: intensity / tail, size: tail });
         }
-      });
-
-      return blobs;
+      }
+      return blobs.sort((a, b) => b.intensity - a.intensity).slice(0, 32);
     };
 
-    const trackBlobs = (blobs, now, viewW, viewH) => {
+    const regionSignal = (target, data) => {
+      const radius = Math.min(12, Math.max(3, Math.ceil(Math.max(target.w, target.h) / 2)));
+      const cx = Math.round(target.cx), cy = Math.round(target.cy);
+      let peak = 0, background = 0, count = 0;
+      for (let y = Math.max(0, cy - radius - 2); y <= Math.min(GRID_H - 1, cy + radius + 2); y++) {
+        for (let x = Math.max(0, cx - radius - 2); x <= Math.min(GRID_W - 1, cx + radius + 2); x++) {
+          const index = (y * GRID_W + x) * 4;
+          const value = Math.max(data[index], data[index + 2]) / 255;
+          if (Math.abs(x - cx) <= radius && Math.abs(y - cy) <= radius) peak = Math.max(peak, value);
+          else { background += value; count++; }
+        }
+      }
+      return Math.max(0, peak - background / Math.max(1, count));
+    };
+
+    const scheduleOpticalFrame = () => {
+      videoFrameCallback = typeof cameraPreview.requestVideoFrameCallback === 'function';
+      processingFrameId = videoFrameCallback
+        ? cameraPreview.requestVideoFrameCallback(processFrame)
+        : requestAnimationFrame(processFrame);
+    };
+
+    const trackBlobs = (blobs, now, viewW, viewH, data) => {
       const scaleX = viewW / GRID_W;
       const scaleY = viewH / GRID_H;
 
@@ -1011,7 +1003,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         intensity: b.intensity
       }));
 
-      const matchThreshold = 200;
+      const matchThreshold = 12;
       const targetUsed = new Set();
 
       trackedTargets.forEach(target => {
@@ -1030,20 +1022,20 @@ const char index_html[] PROGMEM = R"rawliteral(
         });
 
         if (bestBlob) {
-          target.x = target.x * 0.6 + bestBlob.x * 0.4;
-          target.y = target.y * 0.6 + bestBlob.y * 0.4;
+          target.x = bestBlob.x;
+          target.y = bestBlob.y;
           target.w = target.w * 0.7 + bestBlob.w * 0.3;
           target.h = target.h * 0.7 + bestBlob.h * 0.3;
-          target.cx = target.cx * 0.6 + bestBlob.cx * 0.4;
-          target.cy = target.cy * 0.6 + bestBlob.cy * 0.4;
+          target.cx = bestBlob.cx;
+          target.cy = bestBlob.cy;
           target.lastSeen = now;
           target.active = true;
           
-          target.signalHistory.push({ time: now, val: bestBlob.intensity });
+          target.signalHistory.push({ time: now, val: regionSignal(target, data) });
           targetUsed.add(bestIdx);
         } else {
           target.active = false;
-          target.signalHistory.push({ time: now, val: 0 });
+          target.signalHistory.push({ time: now, val: regionSignal(target, data) });
         }
 
         while (target.signalHistory.length > 0 && now - target.signalHistory[0].time > 5500) {
@@ -1054,7 +1046,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       });
 
       currentBlobs.forEach((blob, idx) => {
-        if (targetUsed.has(idx)) return;
+        if (targetUsed.has(idx) || trackedTargets.length >= 32) return;
         
         const newTarget = {
           id: nextTargetId++,
@@ -1067,224 +1059,135 @@ const char index_html[] PROGMEM = R"rawliteral(
           firstSeen: now,
           lastSeen: now,
           active: true,
-          signalHistory: [{ time: now, val: blob.intensity }],
+          signalHistory: [{ time: now, val: regionSignal(blob, data) }],
           threatScore: 0,
           blinkState: true,
+          pendingBlinkState: null,
+          pendingBlinkSince: now,
           lastTransitionTime: now,
-          transitions: [],
-          isCamera: false
+          transitions: []
         };
         trackedTargets.push(newTarget);
       });
 
-      trackedTargets = trackedTargets.filter(t => now - t.lastSeen < 1500);
+      trackedTargets = trackedTargets.filter(t => now - t.lastSeen < 2200);
 
       if (trackedTargets.length > 0) {
-        if (!primaryTargetId || !trackedTargets.find(t => t.id === primaryTargetId)) {
           const bestTarget = trackedTargets.reduce((prev, curr) => {
             return (curr.threatScore > prev.threatScore) ? curr : prev;
           }, trackedTargets[0]);
           primaryTargetId = bestTarget.id;
-        }
       } else {
         primaryTargetId = null;
       }
     };
 
+
     const analyzeBlinkFrequency = (target, now) => {
       const history = target.signalHistory;
-      if (history.length < 10) return;
-
-      let minVal = Infinity;
-      let maxVal = -Infinity;
-      history.forEach(pt => {
-        if (pt.val < minVal) minVal = pt.val;
-        if (pt.val > maxVal) maxVal = pt.val;
-      });
-
+      if (history.length < 4) return;
+      let minVal = Infinity, maxVal = -Infinity;
+      for (const sample of history) {
+        minVal = Math.min(minVal, sample.val);
+        maxVal = Math.max(maxVal, sample.val);
+      }
       const range = maxVal - minVal;
-      const targetDur = config.blinkRateTarget;
-
-      if (range < 0.12) {
-        target.threatScore = Math.max(0, target.threatScore - 0.5);
-        if (target.threatScore < 40 && target.isCamera) {
-          target.isCamera = false;
-        }
-        return;
-      }
-
-      const timeSinceLastTransition = now - target.lastTransitionTime;
-      const timeoutThreshold = Math.max(1500, targetDur * 2.2);
-      if (timeSinceLastTransition > timeoutThreshold) {
-        target.threatScore = Math.max(0, target.threatScore - 0.5);
-        if (target.threatScore < 40 && target.isCamera) {
-          target.isCamera = false;
-        }
-        if (target.transitions.length > 0 && timeSinceLastTransition > timeoutThreshold + 1000) {
-          target.transitions = [];
-        }
-      }
-
-      const thresholdVal = minVal + (range * 0.5);
-      const currentVal = history[history.length - 1].val;
-      const isCurrentlyOn = currentVal > thresholdVal;
-
-      if (isCurrentlyOn !== target.blinkState) {
-        const duration = now - target.lastTransitionTime;
-        target.blinkState = isCurrentlyOn;
+      const expired = now - target.lastTransitionTime > 1500 || now - target.lastSeen > 1000;
+      if (expired) {
+        target.threatScore = 0;
+        target.transitions = [];
+        target.blinkState = null;
+        target.pendingBlinkState = null;
         target.lastTransitionTime = now;
-
-        if (duration > 100 && duration < 2500) {
-          target.transitions.push({ time: now, dur: duration });
-        }
-
-        if (target.transitions.length > 8) {
-          target.transitions.shift();
-        }
-
-        verifyTransitionsConsistency(target);
       }
-    };
-
-    const verifyTransitionsConsistency = (target) => {
-      if (target.transitions.length < 4) {
-        target.threatScore = Math.max(0, target.threatScore - 5);
+      if (range < 0.08) {
+        target.threatScore = 0;
+        target.transitions = [];
+        target.pendingBlinkState = null;
         return;
       }
 
-      let matchCount = 0;
-      const recentTrans = target.transitions.slice(-6);
-      const targetRate = config.blinkRateTarget;
-      const tolerance = Math.max(80, targetRate * 0.20);
-
-      recentTrans.forEach(tr => {
-        if (Math.abs(tr.dur - targetRate) <= tolerance) {
-          matchCount++;
-        }
-      });
-
-      const matchRatio = matchCount / recentTrans.length;
-
-      let totalJitter = 0;
-      for (let i = 1; i < recentTrans.length; i++) {
-        totalJitter += Math.abs(recentTrans[i].dur - recentTrans[i-1].dur);
+      const value = history[history.length - 1].val;
+      const high = minVal + range * 0.65;
+      const low = minVal + range * 0.35;
+      const state = value >= high ? true : value <= low ? false : target.blinkState;
+      if (state === null || state === target.blinkState) {
+        target.pendingBlinkState = null;
+        return;
       }
-      const avgJitter = recentTrans.length > 1 ? totalJitter / (recentTrans.length - 1) : 0;
-      const maxAllowedJitter = Math.max(80, targetRate * 0.25);
-
-      if (matchRatio >= 0.75 && avgJitter <= maxAllowedJitter) {
-        target.threatScore = Math.min(100, target.threatScore + 15);
-        if (target.threatScore >= 75 && !target.isCamera) {
-          target.isCamera = true;
-        }
-      } else {
-        target.threatScore = Math.max(0, target.threatScore - 15);
-        if (target.threatScore < 40 && target.isCamera) {
-          target.isCamera = false;
-        }
+      if (state !== target.pendingBlinkState) {
+        target.pendingBlinkState = state;
+        target.pendingBlinkSince = now;
+        return;
       }
+      // Brief pixel noise must not create an on/off edge.
+      if (now - target.pendingBlinkSince < 70) return;
+      const transitionTime = target.pendingBlinkSince;
+      if (target.blinkState !== null) {
+        const duration = transitionTime - target.lastTransitionTime;
+        target.transitions.push(duration);
+        if (target.transitions.length > 2) target.transitions.shift();
+      }
+      target.blinkState = state;
+      target.lastTransitionTime = transitionTime;
+      target.pendingBlinkState = null;
+      // One measured on interval and one off interval give 50%, then 100%.
+      let matchedIntervals = 0;
+      for (let i = target.transitions.length - 1; i >= 0; i--) {
+        if (Math.abs(target.transitions[i] - config.blinkRateTarget) > 150) break;
+        matchedIntervals++;
+      }
+      target.threatScore = matchedIntervals * 50;
     };
+
+    const verifiedTargets = now => trackedTargets
+      .filter(target => target.threatScore === 100 && now - target.lastSeen <= 800 &&
+        now - target.lastTransitionTime <= 900);
 
     const drawHud = (now, viewW, viewH) => {
-      overlayContext.clearRect(0, 0, viewW, viewH);
-
-      trackedTargets.forEach(target => {
-        if (target.threatScore < 30) return;
-
-        const x = Math.max(0, target.x);
-        const y = Math.max(0, target.y);
-        const w = Math.min(viewW - x, target.w);
-        const h = Math.min(viewH - y, target.h);
-
-        const isPrimary = (target.id === primaryTargetId);
-        const isConfirmed = target.threatScore >= 75;
-        const hudColor = isConfirmed ? '#ef4444' : '#f59e0b';
-        const labelText = isConfirmed 
-          ? `⚠️ CAMERA DETECTED (${Math.round(target.threatScore)}%)`
-          : `ANALYZING BLINK (${Math.round(target.threatScore)}%)`;
-
-        overlayContext.strokeStyle = hudColor;
-        overlayContext.lineWidth = isConfirmed ? 3 : 2;
-        overlayContext.setLineDash(isConfirmed ? [] : [4, 4]);
-        overlayContext.strokeRect(x, y, w, h);
-        overlayContext.setLineDash([]);
-        
-        if (isPrimary && isConfirmed) {
-          const bracketSize = Math.max(10, Math.min(w * 0.25, 20));
-          overlayContext.lineWidth = 4;
-          
-          overlayContext.beginPath();
-          overlayContext.moveTo(x + bracketSize, y); overlayContext.lineTo(x, y); overlayContext.lineTo(x, y + bracketSize);
-          overlayContext.stroke();
-
-          overlayContext.beginPath();
-          overlayContext.moveTo(x + w - bracketSize, y); overlayContext.lineTo(x + w, y); overlayContext.lineTo(x + w, y + bracketSize);
-          overlayContext.stroke();
-
-          overlayContext.beginPath();
-          overlayContext.moveTo(x + bracketSize, y + h); overlayContext.lineTo(x, y + h); overlayContext.lineTo(x, y + bracketSize);
-          overlayContext.stroke();
-
-          overlayContext.beginPath();
-          overlayContext.moveTo(x + w - bracketSize, y + h); overlayContext.lineTo(x + w, y + h); overlayContext.lineTo(x + w, y + h - bracketSize);
-          overlayContext.stroke();
-
-          overlayContext.strokeStyle = 'rgba(239, 68, 68, 0.25)';
-          overlayContext.lineWidth = 1;
-          overlayContext.beginPath();
-          overlayContext.moveTo(0, target.cy); overlayContext.lineTo(viewW, target.cy);
-          overlayContext.stroke();
-
-          overlayContext.beginPath();
-          overlayContext.moveTo(target.cx, 0); overlayContext.lineTo(target.cx, viewH);
-          overlayContext.stroke();
-          
-          overlayContext.strokeStyle = hudColor;
-          overlayContext.beginPath();
-          const ringRad = Math.max(w, h) * (0.8 + Math.sin(now / 100) * 0.1);
-          overlayContext.arc(target.cx, target.cy, ringRad, 0, Math.PI * 2);
-          overlayContext.stroke();
-        }
-
-        overlayContext.fillStyle = hudColor;
-        overlayContext.font = 'bold 11px system-ui, -apple-system, sans-serif';
-        
-        const labelWidth = overlayContext.measureText(labelText).width;
-        overlayContext.fillRect(x, Math.max(12, y - 16), labelWidth + 8, 14);
-        
-        overlayContext.fillStyle = '#ffffff';
-        overlayContext.fillText(labelText, x + 4, Math.max(22, y - 6));
-      });
+      overlayContext.strokeStyle = '#ef4444';
+      overlayContext.lineWidth = 2;
+      overlayContext.setLineDash([]);
+      for (const target of verifiedTargets(now)) {
+        // Every displayed target must independently reach full blink verification.
+        const padding = 6;
+        const x = Math.max(0, target.x - padding);
+        const y = Math.max(0, target.y - padding);
+        const width = Math.min(viewW - x, target.w + padding * 2);
+        const height = Math.min(viewH - y, target.h + padding * 2);
+        overlayContext.strokeRect(x, y, width, height);
+      }
     };
 
-    const updateDashboardData = (now) => {
-      if (trackedTargets.length === 0) {
-        blinkScore.textContent = '0%';
-        blinkStatus.textContent = isSimulating ? '(Simulating 500ms spy cam...)' : '(No optical target detected)';
-        blinkStatus.style.color = 'var(--text-muted)';
-        return;
-      }
-
-      const primaryTarget = trackedTargets.find(t => t.id === primaryTargetId) || trackedTargets[0];
-      const threat = Math.round(primaryTarget.threatScore);
-      blinkScore.textContent = `${threat}%`;
-
-      if (threat >= 75) {
-        blinkStatus.textContent = `🚨 COVERT CAMERA CONFIRMED! 500ms rhythmic blink locked`;
-        blinkStatus.style.color = '#ef4444';
-      } else if (threat >= 40) {
-        blinkStatus.textContent = `⚠️ Strobing optical signature detected — analyzing 500ms rhythm (${threat}%)...`;
-        blinkStatus.style.color = 'var(--accent-blue)';
-      } else {
-        blinkStatus.textContent = `Target under observation (${threat}%) — monitoring stability...`;
-        blinkStatus.style.color = 'var(--text-muted)';
-      }
+    const updateDashboardData = now => {
+      const candidates = trackedTargets.filter(target =>
+        now - target.lastSeen <= 800 && now - target.lastTransitionTime <= 900);
+      const score = candidates.reduce((best, target) => Math.max(best, target.threatScore), 0);
+      const detectedCount = verifiedTargets(now).length;
+      blinkScore.textContent = score + '%';
+      blinkStatus.textContent = score === 100
+        ? (isSimulating ? 'Demo blink matched.' : detectedCount + ' blinking light' +
+          (detectedCount === 1 ? '' : 's') + ' matched. Inspect the red boxes.')
+        : score > 0 ? 'Verifying blink — hold steady…'
+        : 'Scanning — hold steady toward the light.';
     };
 
     const processFrame = () => {
       if (!cameraStream) return;
 
-      const now = Date.now();
+      if (cameraPreview.readyState < 2 || cameraPreview.currentTime === lastVideoTime) {
+        scheduleOpticalFrame();
+        return;
+      }
+      const now = performance.now();
+      if (lastOpticalTime && now - lastOpticalTime < 45) {
+        scheduleOpticalFrame();
+        return;
+      }
+      lastVideoTime = cameraPreview.currentTime;
+      const gap = lastOpticalTime ? now - lastOpticalTime : 0;
+      if (gap > 750) { trackedTargets = []; primaryTargetId = null; }
+      lastOpticalTime = now;
 
       // Synchronize overlay canvas pixel dimensions with display container
       const containerRect = cameraCanvasContainer.getBoundingClientRect();
@@ -1297,21 +1200,15 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
       }
 
-      // Draw camera preview onto 320x240 processing canvas
+      // Preserve the actual video aspect ratio when processing.
       processingContext.drawImage(cameraPreview, 0, 0, GRID_W, GRID_H);
 
       // Inject simulated 500ms blinking IR target when simulation is enabled
       if (isSimulating) {
-        if (now - lastSimBlinkTime >= 500) {
-          simBlinkState = !simBlinkState;
-          lastSimBlinkTime = now;
-        }
+        simBlinkState = Math.floor((now - lastSimBlinkTime) / 500) % 2 === 0;
         
-        simAngle += 0.015;
-        const orbitRadiusX = GRID_W * 0.25;
-        const orbitRadiusY = GRID_H * 0.25;
-        const simX = Math.round(GRID_W / 2 + Math.cos(simAngle) * orbitRadiusX);
-        const simY = Math.round(GRID_H / 2 + Math.sin(simAngle) * orbitRadiusY);
+        const simX = Math.round(GRID_W / 2);
+        const simY = Math.round(GRID_H / 2);
         
         if (simBlinkState) {
           processingContext.fillStyle = 'rgba(255, 30, 220, 1.0)';
@@ -1323,8 +1220,8 @@ const char index_html[] PROGMEM = R"rawliteral(
 
       const imgData = processingContext.getImageData(0, 0, GRID_W, GRID_H);
       const data = imgData.data;
-      const matchingPixels = [];
-      const stride = 2;
+      opticalMask.fill(0);
+      const stride = 1;
 
       for (let y = 0; y < GRID_H; y += stride) {
         for (let x = 0; x < GRID_W; x += stride) {
@@ -1333,25 +1230,51 @@ const char index_html[] PROGMEM = R"rawliteral(
           const g = data[idx+1];
           const b = data[idx+2];
           
-          if (r > 50 && b > 50 && r > g + 2 && b > g + 2) {
+          // Bright IR cores can lose their pink colour when the sensor saturates.
+          const brightest = Math.max(r, g, b);
+          let matches = false;
+          if (brightest > 190 && Math.min(r, g, b) > brightest * 0.75 &&
+              x >= 3 && y >= 3 && x < GRID_W - 3 && y < GRID_H - 3) {
+            let surrounding = 0;
+            for (const offset of [-3, 3, -3 * GRID_W, 3 * GRID_W]) {
+              const neighbour = idx + offset * 4;
+              surrounding += Math.max(data[neighbour], data[neighbour + 1], data[neighbour + 2]);
+            }
+            matches = brightest - surrounding / 4 > 35;
+          }
+          if (r > 30 && b > 30 && r > g + 2 && b > g + 2) {
             const [h, s, l] = rgbToHsl(r, g, b);
             
             let hueDiff = Math.abs(h - config.hueCenter);
             if (hueDiff > 180) hueDiff = 360 - hueDiff;
             
             if (hueDiff <= config.hueTolerance && s >= config.minSaturation && l >= config.minLightness) {
-              matchingPixels.push({ x, y, intensity: l });
+              matches = true;
             }
+          }
+          if (matches) {
+            opticalMask[y * GRID_W + x] = 1;
+            opticalIntensity[y * GRID_W + x] = brightest / 255;
           }
         }
       }
 
-      const blobs = findBlobs(matchingPixels);
-      trackBlobs(blobs, now, detectionOverlay.width, detectionOverlay.height);
-      drawHud(now, detectionOverlay.width, detectionOverlay.height);
+      const blobs = findBlobs();
+      trackBlobs(blobs, now, GRID_W, GRID_H, data);
+      overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
+      const scale = Math.min(detectionOverlay.width / cameraPreview.videoWidth,
+        detectionOverlay.height / cameraPreview.videoHeight);
+      const imageW = cameraPreview.videoWidth * scale;
+      const imageH = cameraPreview.videoHeight * scale;
+      overlayContext.save();
+      overlayContext.translate((detectionOverlay.width - imageW) / 2,
+        (detectionOverlay.height - imageH) / 2);
+      overlayContext.scale(imageW / GRID_W, imageH / GRID_H);
+      drawHud(now, GRID_W, GRID_H);
+      overlayContext.restore();
       updateDashboardData(now);
 
-      processingFrameId = requestAnimationFrame(processFrame);
+      scheduleOpticalFrame();
     };
 
     const startCamera = async () => {
@@ -1372,6 +1295,22 @@ const char index_html[] PROGMEM = R"rawliteral(
         });
         cameraPreview.srcObject = cameraStream;
         await cameraPreview.play();
+        if (!cameraPreview.videoWidth || !cameraPreview.videoHeight) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+          throw new Error('Camera dimensions unavailable.');
+        }
+        const processingScale = Math.min(1, 640 / Math.max(cameraPreview.videoWidth, cameraPreview.videoHeight));
+        GRID_W = Math.max(1, Math.round(cameraPreview.videoWidth * processingScale));
+        GRID_H = Math.max(1, Math.round(cameraPreview.videoHeight * processingScale));
+        processingCanvas.width = GRID_W;
+        processingCanvas.height = GRID_H;
+        opticalMask = new Uint8Array(GRID_W * GRID_H);
+        opticalIntensity = new Float32Array(GRID_W * GRID_H);
+        opticalQueue = new Int32Array(GRID_W * GRID_H);
+        lastVideoTime = -1;
+        lastOpticalTime = 0;
+        lastSimBlinkTime = performance.now();
         cameraPreview.style.display = 'block';
         cameraPlaceholder.style.display = 'none';
         cameraCanvasContainer.classList.add('camera-active');
@@ -1380,7 +1319,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         cameraToggleBtn.textContent = 'Turn Camera Off';
         setCameraStatus(true);
         logMessage('Camera feed active. Point camera at hidden locations.');
-        processingFrameId = requestAnimationFrame(processFrame);
+        scheduleOpticalFrame();
       } catch (error) {
         const message = error.name === 'NotAllowedError'
           ? 'Camera permission denied. Allow camera access and try again.'
@@ -1397,7 +1336,8 @@ const char index_html[] PROGMEM = R"rawliteral(
         cameraStream = null;
       }
       if (processingFrameId) {
-        cancelAnimationFrame(processingFrameId);
+        if (videoFrameCallback) cameraPreview.cancelVideoFrameCallback(processingFrameId);
+        else cancelAnimationFrame(processingFrameId);
         processingFrameId = null;
       }
       cameraPreview.srcObject = null;
@@ -1411,6 +1351,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       overlayContext.clearRect(0, 0, detectionOverlay.width, detectionOverlay.height);
       trackedTargets = [];
       primaryTargetId = null;
+      document.getElementById('blinkResult').hidden = false;
       blinkScore.textContent = '0%';
       blinkStatus.textContent = '(No optical target detected)';
       blinkStatus.style.color = 'var(--text-muted)';
@@ -1429,8 +1370,11 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     simulationToggleBtn.addEventListener('click', () => {
       isSimulating = !isSimulating;
+      lastSimBlinkTime = performance.now();
+      simBlinkState = true;
       trackedTargets = [];
       primaryTargetId = null;
+      document.getElementById('blinkResult').hidden = false;
       blinkScore.textContent = '0%';
       simulationToggleBtn.textContent = isSimulating ? 'Stop Demo Blink' : 'Run Demo Blink';
       logMessage(isSimulating ? 'Demo IR blink simulation started.' : 'Demo IR blink simulation stopped.');
@@ -1484,12 +1428,9 @@ const char index_html[] PROGMEM = R"rawliteral(
       localStorage.setItem(KEY_CONTACT, FIXED_CONTACT);
       closeSettings();
       logMessage('✅ Emergency profile saved. Requesting location permission...');
-      if ('geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          () => logMessage('✅ Location permission granted. SOS ready.'),
-          () => logMessage('⚠️ Location permission denied. SOS will send without GPS.'),
-          { timeout: 10000, maximumAge: 60000 });
-      }
+      requestLocation(
+        () => logMessage('✅ Location acquired. SOS ready.'),
+        reason => logMessage('⚠️ ' + reason));
     });
 
     // ─── SOS Alert ────────────────────────────────────────────────────────────
@@ -1498,41 +1439,171 @@ const char index_html[] PROGMEM = R"rawliteral(
     const sosCancel  = document.getElementById('sosCancel');
     const sosConfirm = document.getElementById('sosConfirm');
     let lastSosSentAt = 0;
+    let recentLocation = null;
+    let sosLocationPending = false;
 
-    function sendSOSAlert(lat, lon) {
-      const now = Date.now();
-      if (now - lastSosSentAt < 30000) return;
-      lastSosSentAt = now;
-      const name    = localStorage.getItem(KEY_NAME)    || 'Unknown User';
-      const contact = localStorage.getItem(KEY_CONTACT) || '';
-      if (!contact) { logMessage('⚠️ SOS: No emergency contact set. Tap ⚙️ to add one.'); return; }
-      const locationStr = (lat !== null && lon !== null) ? `https://maps.google.com/?q=${lat},${lon}` : 'Unavailable';
-      const message = `🚨 EMERGENCY: ${name} has triggered an SOS alert. Location: ${locationStr}`;
-      const chatId = contact.replace(/\D/g, '') + '@c.us';
-      fetch(`https://api.green-api.com/waInstance${GREEN_API_INSTANCE}/sendMessage/${GREEN_API_TOKEN}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId, message })
-      })
-        .then(res => res.json())
-        .then(() => logMessage('🚨 SOS alert sent via WhatsApp.'))
-        .catch(() => logMessage('⚠️ SOS: WhatsApp delivery failed. Check connectivity.'));
+
+    let sosSending = false;
+
+    function locationFailureReason(error) {
+      if (!window.isSecureContext) return 'Location requires a trusted browser context. Open in the full browser and check secure access to this dashboard.';
+      if (error && error.code === 1) return 'Location permission blocked. Check phone, browser, and site permissions.';
+      if (error && error.code === 3) return 'Location timed out. Enable phone Location and try near a window or outdoors.';
+      return 'Phone location unavailable. Check Location, precise location permission, and mobile data.';
     }
 
-    function triggerSOSWithLocation() {
-      logMessage('🚨 SOS Triggered! Fetching GPS coordinates...');
-      if ('geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => { logMessage('🚨 GPS acquired. Sending WhatsApp alert...'); sendSOSAlert(pos.coords.latitude, pos.coords.longitude); },
-          () => { logMessage('🚨 GPS denied. Sending alert without location...'); sendSOSAlert(null, null); },
-          { timeout: 5000 });
-      } else sendSOSAlert(null, null);
+    function validPosition(position) {
+      const c = position && position.coords;
+      const age = position && Date.now() - position.timestamp;
+      return c && Number.isFinite(c.latitude) && Math.abs(c.latitude) <= 90 &&
+        Number.isFinite(c.longitude) && Math.abs(c.longitude) <= 180 &&
+        Number.isFinite(c.accuracy) && c.accuracy >= 0 &&
+        Number.isFinite(age) && age >= 0;
+    }
+
+    function locationSummary(position) {
+      return 'Location age ' + Math.round((Date.now() - position.timestamp) / 1000) +
+        ' seconds; reported accuracy ±' + Math.round(position.coords.accuracy) + ' metres.';
+    }
+
+    function requestLocation(onSuccess, onFailure, onProgress = () => {}) {
+      if (!navigator.geolocation) {
+        onFailure(locationFailureReason(null));
+        return;
+      }
+      const attempts = [
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      ];
+      const reasons = [];
+      const attempt = index => {
+        onProgress('Getting location — attempt ' + (index + 1) + ' of 3…');
+        const fail = error => {
+          const reason = error && error.invalid
+            ? 'Phone returned an invalid or old location.'
+            : locationFailureReason(error);
+          reasons.push(reason);
+          // Repeating a denied permission cannot acquire location.
+          if ((error && error.code === 1) || index === attempts.length - 1) {
+            onFailure([...new Set(reasons)].join(' '));
+            return;
+          }
+          attempt(index + 1);
+        };
+        try {
+          navigator.geolocation.getCurrentPosition(position => {
+            if (!validPosition(position) || Date.now() - position.timestamp > 30000) {
+              fail({ invalid: true });
+              return;
+            }
+            recentLocation = position;
+            onSuccess(position);
+          }, fail, attempts[index]);
+        } catch (_) {
+          onFailure('Browser could not start location acquisition. Check site permissions.');
+        }
+      };
+      attempt(0);
+    }
+
+    document.getElementById('checkLocation').addEventListener('click', async () => {
+      const button = document.getElementById('checkLocation');
+      const diagnostic = document.getElementById('locationDiagnostics');
+      button.disabled = true;
+      let permission = 'unknown';
+      try {
+        if (navigator.permissions) permission =
+          (await navigator.permissions.query({ name: 'geolocation' })).state;
+      } catch (_) {}
+      const context = 'Secure context: ' + window.isSecureContext +
+        '; geolocation available: ' + Boolean(navigator.geolocation) +
+        '; permission: ' + permission + '. ';
+      diagnostic.textContent = context + 'Acquiring location (up to three attempts, 35 seconds)…';
+      requestLocation(position => {
+        diagnostic.textContent = context + locationSummary(position);
+        button.disabled = false;
+      }, reason => {
+        diagnostic.textContent = context + reason;
+        button.disabled = false;
+      });
+    });
+
+    async function sendSOSAlert(position, reason) {
+      const notice = document.getElementById('locationNotice');
+      const name = localStorage.getItem(KEY_NAME) || 'Unknown User';
+      const contact = localStorage.getItem(KEY_CONTACT) || '';
+      if (!contact) throw new Error('Set an emergency contact in Settings.');
+      const hasLocation = validPosition(position) && Date.now() - position.timestamp <= 30000;
+      const location = hasLocation
+        ? 'https://maps.google.com/?q=' + position.coords.latitude + ',' + position.coords.longitude +
+          ' (' + locationSummary(position) + ')'
+        : 'Unavailable. Reason: ' + (reason || 'No fresh location could be acquired.');
+      const message = '🚨 EMERGENCY: ' + name +
+        ' has triggered an SOS alert. Location: ' + location;
+      const chatId = contact.replace(/\D/g, '') + '@c.us';
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch(
+          `https://api.green-api.com/waInstance${GREEN_API_INSTANCE}/sendMessage/${GREEN_API_TOKEN}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chatId, message }), signal: controller.signal
+        });
+        if (!response.ok) throw new Error('WhatsApp request rejected (HTTP ' + response.status + ').');
+        const result = await response.json();
+        if (!result.idMessage) throw new Error('WhatsApp response did not confirm acceptance.');
+        notice.textContent = 'SOS message sent to WhatsApp (request accepted). ' +
+          (hasLocation ? locationSummary(position) : location);
+        logMessage('SOS message sent to WhatsApp (request accepted).');
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function triggerSOSWithLocation() {
+      const notice = document.getElementById('locationNotice');
+      notice.hidden = false;
+      if (sosLocationPending || sosSending) return;
+      if (Date.now() - lastSosSentAt < 30000) {
+        notice.textContent = 'An SOS was recently attempted. Wait 30 seconds before sending again.';
+        return;
+      }
+      sosLocationPending = true;
+      sosConfirm.disabled = true;
+      notice.textContent = 'Getting location before sending SOS (up to three attempts, 35 seconds)…';
+      let reason = '';
+      let position = validPosition(recentLocation) &&
+        Date.now() - recentLocation.timestamp <= 30000 ? recentLocation : null;
+      try {
+        if (!position) position = await new Promise(resolve => {
+          requestLocation(resolve, failure => { reason = failure; resolve(null); },
+            progress => { notice.textContent = progress; });
+        });
+        sosLocationPending = false;
+        sosSending = true;
+        // Apply the cooldown to each send attempt, including uncertain network outcomes.
+        lastSosSentAt = Date.now();
+        notice.textContent = position ? 'Location acquired. Sending SOS…'
+          : 'Location failed. Sending SOS with the reason…';
+        await sendSOSAlert(position, reason);
+      } catch (error) {
+        notice.textContent = 'SOS submission could not be confirmed. ' +
+          (error.name === 'AbortError' || error instanceof TypeError
+            ? 'Network response unavailable. Check WhatsApp before retrying to avoid duplicates.'
+            : error.message);
+        logMessage('SOS submission could not be confirmed.');
+      } finally {
+        sosLocationPending = false;
+        sosSending = false;
+        sosConfirm.disabled = false;
+      }
     }
 
     sosBtn.addEventListener('click', () => sosModal.classList.add('active'));
     sosCancel.addEventListener('click', () => sosModal.classList.remove('active'));
     sosConfirm.addEventListener('click', () => {
       sosModal.classList.remove('active');
-      lastSosSentAt = 0;
       triggerSOSWithLocation();
     });
 
@@ -1657,11 +1728,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           const transcript = e.results[i][0].transcript.toLowerCase();
           if (transcript.includes(codeWordLower)) {
             logMessage('🔑 Code word detected — silent SOS triggered.');
-            if ('geolocation' in navigator) {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => sendSOSAlert(pos.coords.latitude, pos.coords.longitude),
-                () => sendSOSAlert(null, null), { timeout: 5000 });
-            } else sendSOSAlert(null, null);
+            triggerSOSWithLocation();
             break;
           }
         }
@@ -2680,6 +2747,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 void handleRoot() {
+  server.sendHeader("Cache-Control", "no-store");
   size_t totalLen = strlen(index_html);
   server.setContentLength(totalLen);
   server.send(200, "text/html", "");
