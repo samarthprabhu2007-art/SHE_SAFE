@@ -37,6 +37,8 @@ DeepScanState deepScanState = DeepScanState::Idle; // Protected by jsonMutex.
 String deepScanJson = "[]";
 const char* deepScanError = nullptr;
 bool deepScanHomeOnly = false;
+uint16_t deepScanChannelMask = 0;
+String deepScanRadioNote;
 
 struct DeepScanClient {
   uint8_t mac[6];
@@ -101,7 +103,28 @@ void captureDeepScanClient(void* buffer, wifi_promiscuous_pkt_type_t type) {
   portEXIT_CRITICAL(&deepScanMux);
 }
 
-const char* runDeepScan(String& results, bool& homeOnly) {
+// Let the station driver schedule an off-channel visit and return to the hotspot.
+bool listenOnDeepScanChannel(uint8_t channel, uint32_t dwellMs, String& note) {
+  wifi_scan_config_t scan = {};
+  scan.channel = channel;
+  scan.scan_type = WIFI_SCAN_TYPE_PASSIVE;
+  scan.scan_time.passive = dwellMs;
+  const esp_err_t status = esp_wifi_scan_start(&scan, true);
+  if (status == ESP_OK) {
+    // Client observations come from the packet callback, not the driver's AP list.
+    esp_wifi_clear_ap_list();
+    return true;
+  }
+  if (note.isEmpty()) {
+    char detail[112];
+    snprintf(detail, sizeof(detail), "Passive scan on channel %u failed (%s).",
+             channel, esp_err_to_name(status));
+    note = detail;
+  }
+  return false;
+}
+
+const char* runDeepScan(String& results, bool& homeOnly, uint16_t& channelMask, String& note) {
   uint8_t homeChannel;
   wifi_second_chan_t homeSecondary;
   wifi_country_t country;
@@ -110,7 +133,16 @@ const char* runDeepScan(String& results, bool& homeOnly) {
       esp_wifi_get_mac(WIFI_IF_STA, deepScanOwnMac) != ESP_OK) {
     return "Deep Scan could not read the Wi-Fi radio settings.";
   }
-  const bool countryAvailable = esp_wifi_get_country(&country) == ESP_OK;
+  const esp_err_t countryStatus = esp_wifi_get_country(&country);
+  const bool countryAvailable = countryStatus == ESP_OK && country.schan >= 1 &&
+    country.schan <= 13 && country.nchan > 0;
+  if (countryStatus != ESP_OK) {
+    note = String("Channel range lookup failed (") + esp_err_to_name(countryStatus) + ").";
+  } else if (!countryAvailable) {
+    note = "Radio returned no usable 2.4 GHz channel range.";
+  } else if (country.schan == homeChannel && country.nchan == 1) {
+    note = "The radio's configured channel range contains only the hotspot channel.";
+  }
 
   wifi_promiscuous_filter_t filter = {WIFI_PROMIS_FILTER_MASK_DATA};
   if (esp_wifi_set_promiscuous_filter(&filter) != ESP_OK ||
@@ -124,31 +156,42 @@ const char* runDeepScan(String& results, bool& homeOnly) {
 
   const bool homeIs24GHz = homeChannel >= 1 && homeChannel <= 13;
   bool visitedOtherChannel = false;
-  bool restored = true;
-  if (countryAvailable) {
-    for (int channel = country.schan; channel < country.schan + country.nchan && channel <= 13; ++channel) {
-      if (channel < 1 || channel == homeChannel) continue;
-      if (esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE) != ESP_OK) continue;
-      visitedOtherChannel = true;
-      vTaskDelay(pdMS_TO_TICKS(300));
-      restored = esp_wifi_set_channel(homeChannel, homeSecondary) == ESP_OK;
-      if (!restored) break;
-      vTaskDelay(pdMS_TO_TICKS(120));
+  // Accumulate clients across passes. Brief visits back home keep the dashboard reachable.
+  for (int pass = 0; pass < 4 && WiFi.status() == WL_CONNECTED; ++pass) {
+    bool hoppedThisPass = false;
+    if (countryAvailable) {
+      for (int channel = country.schan; channel < country.schan + country.nchan && channel <= 13; ++channel) {
+        if (channel < 1 || channel == homeChannel) continue;
+        if (listenOnDeepScanChannel(channel, 400, note)) {
+          visitedOtherChannel = true;
+          hoppedThisPass = true;
+          channelMask |= 1U << channel;
+        }
+        vTaskDelay(pdMS_TO_TICKS(150));
+      }
+    }
+    if (homeIs24GHz && WiFi.status() == WL_CONNECTED) {
+      vTaskDelay(pdMS_TO_TICKS(hoppedThisPass ? 400 : 3000));
+      uint8_t actual = 0;
+      wifi_second_chan_t secondary;
+      const esp_err_t readStatus = esp_wifi_get_channel(&actual, &secondary);
+      if (readStatus == ESP_OK && actual == homeChannel) channelMask |= 1U << homeChannel;
+      else if (readStatus != ESP_OK) note = String("Hotspot channel read failed (") + esp_err_to_name(readStatus) + ").";
+      else note = String("Expected hotspot channel ") + homeChannel + ", radio reported " + actual + ".";
     }
   }
-  if (homeIs24GHz && restored) vTaskDelay(pdMS_TO_TICKS(visitedOtherChannel ? 400 : 2000));
-  homeOnly = !visitedOtherChannel && homeIs24GHz;
+  homeOnly = !visitedOtherChannel && homeIs24GHz && channelMask != 0;
 
   portENTER_CRITICAL(&deepScanMux);
   deepScanAccepting = false;
   portEXIT_CRITICAL(&deepScanMux);
   const esp_err_t stopResult = esp_wifi_set_promiscuous(false);
-  if (!restored || WiFi.status() != WL_CONNECTED) {
-    // Rejoin the configured hotspot if the radio could not return to its channel.
+  if (WiFi.status() != WL_CONNECTED) {
+    note += " Hotspot connection interrupted during the scan.";
     WiFi.reconnect();
   }
   if (stopResult != ESP_OK) return "Deep Scan could not stop Wi-Fi listening.";
-  if (!visitedOtherChannel && !homeIs24GHz) {
+  if (!channelMask) {
     return "No 2.4 GHz channel was available. Set the hotspot to 2.4 GHz and reconnect.";
   }
 
@@ -180,11 +223,16 @@ bool processDeepScan() {
 
   String results;
   bool homeOnly = false;
-  const char* error = trackMode == 0 ? runDeepScan(results, homeOnly) : "End device tracking and try again.";
+  uint16_t channelMask = 0;
+  String note;
+  const char* error = trackMode == 0 ? runDeepScan(results, homeOnly, channelMask, note) : "End device tracking and try again.";
+  if (note.length()) Serial.printf("[Deep Scan] %s\n", note.c_str());
   xSemaphoreTake(jsonMutex, portMAX_DELAY);
   deepScanJson = std::move(results);
   deepScanError = error;
   deepScanHomeOnly = homeOnly;
+  deepScanChannelMask = channelMask;
+  deepScanRadioNote = std::move(note);
   deepScanState = error ? DeepScanState::Failed : DeepScanState::Done;
   xSemaphoreGive(jsonMutex);
   return true;
@@ -209,16 +257,20 @@ void handleDeepScanResults() {
   const auto state = deepScanState;
   const char* error = deepScanError;
   const bool homeOnly = deepScanHomeOnly;
+  const uint16_t channelMask = deepScanChannelMask;
+  const String note = deepScanRadioNote;
   String results = "[]";
   if (state == DeepScanState::Done) results = deepScanJson;
   xSemaphoreGive(jsonMutex);
   const bool busy = state == DeepScanState::Pending || state == DeepScanState::Running;
   server.sendHeader("Cache-Control", "no-store");
   if (state == DeepScanState::Failed) {
-    server.send(503, "text/plain", error);
+    server.send(503, "text/plain", String(error) + " " + note);
     return;
   }
   if (state == DeepScanState::Done && homeOnly) server.sendHeader("X-Deep-Scan-Scope", "hotspot");
+  if (state == DeepScanState::Done) server.sendHeader("X-Deep-Scan-Channels", String(channelMask));
+  if (state == DeepScanState::Done && note.length()) server.sendHeader("X-Deep-Scan-Note", note);
   server.send(busy ? 202 : 200, "application/json", results);
 }
 
@@ -1870,7 +1922,10 @@ const char index_html[] PROGMEM = R"rawliteral(
     const POLL_LIST_MS = 1000;       // refresh rate of the device list
     const POLL_TRACK_MS = 350;       // refresh rate while tracking one device
 
-    let espBaseUrl = '', isConnected = false, scanInterval = null, scanInFlight = false;
+    let espBaseUrl = '', isConnected = false, scanInterval = null;
+    let normalScanDone = null;
+    let deepScanRequested = false;
+    let connectionGeneration = 0;
     let lastWifiData = [], lastBleData = [];
     let lastListFetch = 0;
     let demoSimActive = false, demoTimer = null;
@@ -2531,7 +2586,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     async function fetchDeepScan(url, method = 'GET') {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2500);
+      const timer = setTimeout(() => controller.abort(), method === 'POST' ? 10000 : 4000);
       try {
         const response = await fetch(url, { method, signal: controller.signal, cache: 'no-store' });
         if (response.status === 409) throw new Error('Deep Scan is busy or a device is being tracked.');
@@ -2540,7 +2595,9 @@ const char index_html[] PROGMEM = R"rawliteral(
         if (response.status === 202) return null;
         return {
           clients: await response.json(),
-          hotspotOnly: response.headers.get('X-Deep-Scan-Scope') === 'hotspot'
+          radioNote: response.headers.get('X-Deep-Scan-Note'),
+          hotspotOnly: response.headers.get('X-Deep-Scan-Scope') === 'hotspot',
+          channelMask: Number(response.headers.get('X-Deep-Scan-Channels'))
         };
       } finally {
         clearTimeout(timer);
@@ -2552,27 +2609,38 @@ const char index_html[] PROGMEM = R"rawliteral(
         deepScanStatus.textContent = 'Connect to the ESP32 first.';
         return;
       }
-      if (target || scanInFlight) {
-        deepScanStatus.textContent = 'Wait for the current scan or tracking session to finish, then try again.';
+      if (deepScanRequested) return;
+      if (target) {
+        deepScanStatus.textContent = 'End device tracking to start Deep Scan.';
         return;
       }
 
       const baseUrl = espBaseUrl;
-      const networkNames = new Map(lastWifiData.map(ap => [String(ap.bssid).toUpperCase(), ap.ssid]));
-      scanInFlight = true;
+      const generation = connectionGeneration;
+      deepScanRequested = true;
       btnDeepScan.disabled = true;
       btnDeepScan.textContent = 'Scanning…';
       $('wifiList').inert = true;
       $('bleList').inert = true;
       deepScanResults.replaceChildren();
-      deepScanStatus.textContent = 'Listening for Wi-Fi clients…';
       try {
+        if (normalScanDone) {
+          btnDeepScan.textContent = 'Queued…';
+          deepScanStatus.textContent = 'Deep Scan queued. Finishing the current scan…';
+          await normalScanDone;
+        }
+        if (!isConnected || generation !== connectionGeneration) throw new Error('ESP32 connection changed.');
+        if (target) throw new Error('End device tracking to start Deep Scan.');
+        const networkNames = new Map(lastWifiData.map(ap => [String(ap.bssid).toUpperCase(), ap.ssid]));
+        btnDeepScan.textContent = 'Scanning…';
+        deepScanStatus.textContent = 'Starting Deep Scan…';
         await fetchDeepScan(baseUrl + '/deepscan', 'POST');
-        const deadline = Date.now() + 30000;
+        deepScanStatus.textContent = 'Deep Scan accepted. Listening over four passes (about 12–30 seconds)…';
+        const deadline = Date.now() + 60000;
         let result = null;
         while (Date.now() < deadline && result === null) {
           await new Promise(resolve => setTimeout(resolve, 1000));
-          if (!isConnected || espBaseUrl !== baseUrl) throw new Error('ESP32 connection changed.');
+          if (!isConnected || generation !== connectionGeneration) throw new Error('ESP32 connection changed.');
           try {
             result = await fetchDeepScan(baseUrl + '/deepscan');
           } catch (error) {
@@ -2600,18 +2668,27 @@ const char index_html[] PROGMEM = R"rawliteral(
           }
           deepScanResults.appendChild(item);
         }
-        const coverage = hotspotOnly ? 'Hotspot channel only. ' : '';
+        const channels = [];
+        for (let channel = 1; channel <= 13; channel++) {
+          if (result.channelMask & (1 << channel)) channels.push(channel);
+        }
+        const heardChannels = [...new Set(clients.map(client => client.channel))].sort((a, b) => a - b);
+        const coverage = hotspotOnly ? 'Hotspot channel only (' + channels.join(', ') + '). '
+          : 'Scan completed on channels ' + channels.join(', ') + '. ';
         deepScanStatus.textContent = coverage + (clients.length
-          ? clients.length + ' client connections heard. Traffic alone cannot identify a camera.'
-          : 'No client traffic heard during this scan.');
+          ? clients.length + ' client connections heard on ' +
+            (heardChannels.length === 1 ? 'channel ' : 'channels ') + heardChannels.join(', ') + '.'
+          : 'No client traffic heard during this scan.') + (result.radioNote ? ' ' + result.radioNote : '');
       } catch (error) {
-        deepScanStatus.textContent = error.message;
+        deepScanStatus.textContent = error.name === 'AbortError'
+          ? 'The ESP32 did not acknowledge the start request within 10 seconds. Check the hotspot connection.'
+          : error.message;
       } finally {
         $('wifiList').inert = false;
         $('bleList').inert = false;
         btnDeepScan.disabled = false;
         btnDeepScan.textContent = 'Scan 2.4 GHz clients';
-        scanInFlight = false;
+        deepScanRequested = false;
       }
     });
 
@@ -2619,10 +2696,15 @@ const char index_html[] PROGMEM = R"rawliteral(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
       let response;
-      try { response = await fetch(url, { signal: controller.signal, cache: 'no-store' }); }
-      finally { clearTimeout(timeoutId); }
+      let data;
+      try {
+        response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+        if (response.ok) data = await response.json();
+      } catch (error) {
+        if (controller.signal.aborted) throw new Error('ESP32 scan response timed out after 8 seconds');
+        throw error;
+      } finally { clearTimeout(timeoutId); }
       if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
-      const data = await response.json();
       if (!Array.isArray(data)) throw new Error(`${url} did not return a JSON array`);
       const headerValue = response.headers.get('X-Scan-Id');
       const headerId = headerValue === null ? NaN : Number(headerValue);
@@ -2656,9 +2738,10 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     async function fetchSignals() {
-      if (!isConnected || !espBaseUrl || scanInFlight) return;
+      if (!isConnected || !espBaseUrl || normalScanDone || deepScanRequested) return;
       if (!target && Date.now() - lastListFetch < POLL_LIST_MS) return;
-      scanInFlight = true;
+      let finishScan;
+      normalScanDone = new Promise(resolve => { finishScan = resolve; });
       try {
         if (target) {
           // Tracking: poll only the selected device's endpoint, fast.
@@ -2668,7 +2751,10 @@ const char index_html[] PROGMEM = R"rawliteral(
           refreshLabel.textContent = 'Tracking';
         } else {
           lastListFetch = Date.now();
-          const [wifi, ble] = await Promise.all([fetchSignalArray(`${espBaseUrl}/wifi`), fetchSignalArray(`${espBaseUrl}/ble`)]);
+          const replies = await Promise.allSettled([fetchSignalArray(`${espBaseUrl}/wifi`), fetchSignalArray(`${espBaseUrl}/ble`)]);
+          const failure = replies.find(reply => reply.status === 'rejected');
+          if (failure) throw failure.reason;
+          const [wifi, ble] = replies.map(reply => reply.value);
           lastWifiData = wifi; lastBleData = ble;
           wifiCount.textContent = wifi.length; bleCount.textContent = ble.length;
           totalSignalCount.textContent = `${wifi.length + ble.length} signals`;
@@ -2681,12 +2767,14 @@ const char index_html[] PROGMEM = R"rawliteral(
         refreshLabel.textContent = 'Scan failed';
         logMessage(`Scan error: ${err && err.message ? err.message : 'Request failed'}. ${scanFailureHelp(err)}`);
       } finally {
-        scanInFlight = false;
+        normalScanDone = null;
+        finishScan();
       }
     }
 
     btnConnect.addEventListener('click', async () => {
       if (isConnected) {
+        connectionGeneration++;
         setEspTrack(null);
         isConnected = false; espBaseUrl = '';
         clearInterval(scanInterval); scanInterval = null;
