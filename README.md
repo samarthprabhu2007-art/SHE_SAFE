@@ -4,14 +4,19 @@ A personal safety and hidden-camera investigation project developed at RVCE for 
 
 An ESP32 connects to a phone hotspot and serves a mobile browser dashboard with wireless scanning, signal-based direction finding, optical infrared detection, and WhatsApp SOS alerts.
 
+## Research paper
+
+The team's five-page paper, *Embedded Radio Frequency and Computer Vision-Based Spy Camera Detector with Smartphone Integration*, describes the prototype's wireless, optical, and emergency-assistance features. [Read the paper (PDF)](She_safe.pdf) · [Open the LaTeX source](Reserach_Papers_latex/main.tex)
+
 ## Current features
 
 - **Wi-Fi and Bluetooth scanning.** Lists nearby Wi-Fi access points and BLE advertisers with signal strength. A signal threshold slider filters the list.
-- **Wireless direction finding.** Select a Wi-Fi or BLE target, record a starting signal reading, then move and take further readings. The radar combines signal changes with the phone compass to suggest a direction. Wall controls help guide the search.
+- **Wireless direction finding.** Select a Wi-Fi access point, BLE advertiser, or Deep Scan client. The radar compares fresh readings as you move and uses the phone compass to suggest a heading. Mark blocked directions to guide the next move.
 - **Inspection history.** Records devices marked Camera Found or No Camera in browser storage. All, Scanned, and Not Scanned filters organize the current device list. Saved history can be cleared.
-- **Wired-camera optical mode.** Uses the phone camera and browser-based image processing to look for infrared bright spots and blinking patterns. It includes a blink score and attempts to reject static light and color interference. The firmware also drives a pulsing IR LED.
-- **WhatsApp SOS.** A panic button sends a location link through Green API. Voice code-word setup and listening are included for supported browsers.
-- **Wi-Fi Deep Scan.** Passively listens for traffic involving Wi-Fi clients on 2.4 GHz. Results show client MAC addresses, associated access points, channels, and client signal strength when available. Network names are matched from the regular scan. An Inspect flag highlights outgoing traffic and shows frame and byte counts for manual investigation.
+- **Wired-camera optical mode.** The ESP32 pulses an infrared LED and the phone camera looks for a matching blink. One matching interval shows 50% progress. Two consecutive matching intervals show 100% and draw a red box around each matching spot for inspection.
+- **WhatsApp SOS.** The SOS button or a configured voice phrase starts an alert. The phone uses a recent location or tries up to three times to obtain one. It sends a map link when available or includes the reason location failed. The dashboard reports when Green API accepts the message.
+- **Wi-Fi Deep Scan.** Queues behind an active dashboard scan and passively listens for 2.4 GHz client traffic. Each result shows the client MAC, its access point, channel, and client signal strength when available. An **Inspect** flag highlights outgoing traffic. The results have their own strength slider, **Scanned** and **Not Scanned** filters, and **Track** button.
+- **Manufacturer badges.** The offline lookup covers 160 MAC prefixes for 13 camera brands and 420 for Espressif and Tuya. Wi-Fi network badges use the access point's address. Deep Scan badges use the client's address. Public BLE addresses are also eligible. A match identifies the registered manufacturer and still requires physical inspection.
 
 ## Deep Scan status and limits
 
@@ -19,7 +24,7 @@ Deep Scan is implemented and awaiting further device testing. It attempts to vis
 
 Traffic activity alone cannot confirm a camera. Phones and laptops can trigger the Inspect flag. Quiet devices, devices on channels that were not visited, and 5 GHz clients can be missed. An empty result does not establish that a room is clear.
 
-Deep Scan client tracking, motion-based traffic probing, and Room Baseline are not integrated into the active sketch.
+To follow a client, tap **Track** beside its Deep Scan result. The radar uses fresh transmissions from that client on its observed channel. If only the access point transmits, the client can appear in the list without a signal reading. The radar then waits for client traffic. Run Deep Scan again if the device changes networks or channels.
 
 ## Setup
 

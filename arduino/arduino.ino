@@ -12,6 +12,7 @@
 #include <BLEAdvertisedDevice.h>
 #include <esp_idf_version.h>
 #include <esp_wifi.h>
+#include <esp_mac.h>
 #include <utility>
 
 const char* phoneHotspotSsid = "hello";
@@ -28,7 +29,7 @@ SemaphoreHandle_t jsonMutex;
 TaskHandle_t scanTaskHandle = NULL;
 
 // Target-focused scanning so a reading takes well under a second:
-// 0 = Wi-Fi + BLE (full list), 1 = Wi-Fi only, 2 = BLE only. trackChannel 0 = all channels.
+// 0 = full list, 1 = Wi-Fi AP, 2 = BLE, 3 = passive Deep Scan client reading.
 volatile uint8_t trackMode = 0;
 volatile uint8_t trackChannel = 0;
 
@@ -55,6 +56,17 @@ size_t deepScanClientCount = 0;
 uint8_t deepScanOwnMac[6];
 bool deepScanAccepting = false;
 
+// Requested reading and last completed window are shared by the HTTP and scan tasks (jsonMutex).
+size_t clientSlot = 0;
+uint32_t clientPoint = 0, clientPollTime = 0, clientSampleId = 0;
+int clientSampleRssi = -128;
+const char* clientRadioError = nullptr;
+// Only the radio callback and the scan task touch this window (deepScanMux).
+bool clientListening = false;
+uint8_t listenMac[6], listenBssid[6], listenChannel;
+int32_t clientRssiSum = 0;
+uint32_t clientPacketCount = 0;
+
 bool isUnicastMac(const uint8_t* mac) {
   const uint8_t zero[6] = {};
   return !(mac[0] & 1) && memcmp(mac, zero, 6) != 0;
@@ -75,6 +87,11 @@ void captureDeepScanClient(void* buffer, wifi_promiscuous_pkt_type_t type) {
   if (!isUnicastMac(mac) || !isUnicastMac(bssid)) return;
 
   portENTER_CRITICAL(&deepScanMux);
+  if (clientListening && uplink && packet->rx_ctrl.channel == listenChannel &&
+      memcmp(mac, listenMac, 6) == 0 && memcmp(bssid, listenBssid, 6) == 0) {
+    clientRssiSum += packet->rx_ctrl.rssi;
+    ++clientPacketCount;
+  }
   if (deepScanAccepting && memcmp(mac, deepScanOwnMac, 6) != 0) {
     size_t index = 0;
     while (index < deepScanClientCount &&
@@ -124,6 +141,13 @@ bool listenOnDeepScanChannel(uint8_t channel, uint32_t dwellMs, String& note) {
   return false;
 }
 
+bool startDataListener() {
+  wifi_promiscuous_filter_t filter = {WIFI_PROMIS_FILTER_MASK_DATA};
+  return esp_wifi_set_promiscuous_filter(&filter) == ESP_OK &&
+         esp_wifi_set_promiscuous_rx_cb(captureDeepScanClient) == ESP_OK &&
+         esp_wifi_set_promiscuous(true) == ESP_OK;
+}
+
 const char* runDeepScan(String& results, bool& homeOnly, uint16_t& channelMask, String& note) {
   uint8_t homeChannel;
   wifi_second_chan_t homeSecondary;
@@ -144,10 +168,7 @@ const char* runDeepScan(String& results, bool& homeOnly, uint16_t& channelMask, 
     note = "The radio's configured channel range contains only the hotspot channel.";
   }
 
-  wifi_promiscuous_filter_t filter = {WIFI_PROMIS_FILTER_MASK_DATA};
-  if (esp_wifi_set_promiscuous_filter(&filter) != ESP_OK ||
-      esp_wifi_set_promiscuous_rx_cb(captureDeepScanClient) != ESP_OK ||
-      esp_wifi_set_promiscuous(true) != ESP_OK) return "Deep Scan could not start Wi-Fi listening.";
+  if (!startDataListener()) return "Deep Scan could not start Wi-Fi listening.";
 
   portENTER_CRITICAL(&deepScanMux);
   deepScanClientCount = 0;
@@ -286,6 +307,104 @@ void irLedBlinkTask(void* parameter) {
   }
 }
 
+void readDeepClient(uint32_t sampleId) {
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  if (trackMode != 3 || millis() - clientPollTime > 5000) {
+    if (trackMode == 3) trackMode = 0;
+    xSemaphoreGive(jsonMutex);
+    return;
+  }
+  const size_t slot = clientSlot;
+  const uint32_t point = clientPoint;
+  const auto client = deepScanClients[slot];
+  xSemaphoreGive(jsonMutex);
+
+  int rssi = -128;
+  const char* error = nullptr;
+  uint8_t home = 0;
+  wifi_second_chan_t secondary;
+  if (WiFi.status() != WL_CONNECTED || esp_wifi_get_channel(&home, &secondary) != ESP_OK || !startDataListener()) {
+    error = "Client tracking could not start Wi-Fi listening.";
+  } else {
+    portENTER_CRITICAL(&deepScanMux);
+    memcpy(listenMac, client.mac, 6);
+    memcpy(listenBssid, client.bssid, 6);
+    listenChannel = client.channel;
+    clientRssiSum = 0;
+    clientPacketCount = 0;
+    clientListening = true;
+    portEXIT_CRITICAL(&deepScanMux);
+    if (home == client.channel) {
+      vTaskDelay(pdMS_TO_TICKS(350));
+    } else {
+      String note;
+      if (!listenOnDeepScanChannel(client.channel, 350, note)) error = "Cannot listen on the selected client channel.";
+    }
+    portENTER_CRITICAL(&deepScanMux);
+    clientListening = false;
+    if (clientPacketCount) rssi = clientRssiSum / static_cast<int32_t>(clientPacketCount);
+    portEXIT_CRITICAL(&deepScanMux);
+    if (esp_wifi_set_promiscuous(false) != ESP_OK) error = "Could not stop client listening.";
+  }
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  if (trackMode == 3 && clientSlot == slot && clientPoint == point) {
+    clientSampleId = sampleId;
+    clientSampleRssi = rssi;
+    clientRadioError = error;
+  }
+  xSemaphoreGive(jsonMutex);
+  // Give the hotspot time for HTTP between off-channel visits, including after a radio error.
+  vTaskDelay(pdMS_TO_TICKS(150));
+}
+
+// A slot belongs to one result in the last completed scan. Verify the stored address
+// pair as well, so an old browser list cannot silently switch to a different device.
+void handleClientReading() {
+  const String slotText = server.arg("slot");
+  const String pointText = server.arg("point");
+  const long slot = slotText.toInt();
+  const uint32_t point = strtoul(pointText.c_str(), nullptr, 10);
+  const String mac = server.arg("mac"), bssid = server.arg("bssid");
+  server.sendHeader("Cache-Control", "no-store");
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
+  if (deepScanState != DeepScanState::Done || (trackMode != 0 && trackMode != 3) ||
+      !point || slot < 0 || slotText != String(slot) || static_cast<size_t>(slot) >= deepScanClientCount) {
+    xSemaphoreGive(jsonMutex);
+    server.send(409, "text/plain", "End tracking and run Deep Scan again.");
+    return;
+  }
+  const auto& client = deepScanClients[slot];
+  char addr[18], ap[18];
+  snprintf(addr, sizeof(addr), MACSTR, MAC2STR(client.mac));
+  snprintf(ap, sizeof(ap), MACSTR, MAC2STR(client.bssid));
+  if (!mac.equalsIgnoreCase(addr) || !bssid.equalsIgnoreCase(ap)) {
+    xSemaphoreGive(jsonMutex);
+    server.send(409, "text/plain", "This result changed. Run Deep Scan again.");
+    return;
+  }
+  if (trackMode != 3 || clientSlot != static_cast<size_t>(slot) || clientPoint != point) {
+    clientSlot = slot;
+    clientPoint = point;
+    clientSampleId = 0;
+    clientSampleRssi = -128;
+    clientRadioError = nullptr;
+  }
+  clientPollTime = millis();
+  trackMode = 3;
+  const uint32_t id = clientSampleId;
+  const int rssi = clientSampleRssi;
+  const char* error = clientRadioError;
+  xSemaphoreGive(jsonMutex);
+  if (error) {
+    server.send(503, "text/plain", error);
+    return;
+  }
+  char body[64];
+  if (rssi == -128) snprintf(body, sizeof(body), "{\"id\":%lu,\"rssi\":null}", (unsigned long)id);
+  else snprintf(body, sizeof(body), "{\"id\":%lu,\"rssi\":%d}", (unsigned long)id, rssi);
+  server.send(200, "application/json", body);
+}
+
 void scanTask(void* parameter) {
   uint32_t localScanId = 0;
   TickType_t lastCycleStart = xTaskGetTickCount();
@@ -297,6 +416,11 @@ void scanTask(void* parameter) {
     const uint32_t currentScanId = ++localScanId;
     const uint8_t mode = trackMode;
     const uint8_t ch = trackChannel;
+    if (mode == 3) {
+      readDeepClient(currentScanId);
+      lastCycleStart = xTaskGetTickCount();
+      continue;
+    }
 
     // 1. Wi-Fi scan (skipped while tracking a Bluetooth target)
     bool wifiScanOk = false;
@@ -342,6 +466,8 @@ void scanTask(void* parameter) {
           tempBle += "{";
           String deviceId = dev.getAddress().toString().c_str();
           tempBle += "\"id\":\"" + deviceId + "\",";
+          // Both ESP32 BLE stacks report a public device address as type 0.
+          tempBle += (dev.getAddressType() == 0 ? "\"publicAddress\":true," : "\"publicAddress\":false,");
           tempBle += "\"name\":\"" + name + "\",";
           tempBle += "\"rssi\":" + String(dev.getRSSI()) + ",";
           tempBle += "\"scanId\":" + String(currentScanId);
@@ -418,6 +544,7 @@ void handleWhatsApp() {
 // GET /track?type=ble        -> scan only Bluetooth
 // GET /track?off=1           -> back to full Wi-Fi + BLE scanning
 void handleTrack() {
+  xSemaphoreTake(jsonMutex, portMAX_DELAY);
   if (server.hasArg("off")) {
     trackMode = 0;
     trackChannel = 0;
@@ -426,6 +553,7 @@ void handleTrack() {
     trackMode = (t == "wifi") ? 1 : (t == "ble") ? 2 : 0;
     trackChannel = server.hasArg("ch") ? (uint8_t)server.arg("ch").toInt() : 0;
   }
+  xSemaphoreGive(jsonMutex);
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -625,6 +753,10 @@ const char index_html[] PROGMEM = R"rawliteral(
     .rssi-value { font-size: .72rem; font-weight: 700; color: var(--text-muted); }
     .rssi-bar-bg { width: 56px; height: 6px; background-color: #f2c9d8; border-radius: 3px; overflow: hidden; }
     .rssi-bar-fill { height: 100%; border-radius: 3px; }
+    .vendor-tag { display: inline-block; padding: 3px 6px; border-radius: 6px; font-size: .69rem;
+      font-weight: 600; line-height: 1.2; color: #79314d; background: #fbe1ea; }
+    .vendor-tag.iot { color: #415569; background: #e7edf2; }
+    .deep-scan-result .vendor-tag { margin-right: 5px; }
     .btn-track { background-color: #fff0f5; color: var(--accent-blue); border: 1px solid var(--border-color);
       border-radius: 8px; padding: 6px 12px; font-size: .74rem; font-weight: 700; cursor: pointer; flex-shrink: 0; }
     .btn-track:hover { background-color: var(--accent-blue); color: #fff; }
@@ -667,6 +799,10 @@ const char index_html[] PROGMEM = R"rawliteral(
     .wall-center { display: flex; align-items: center; justify-content: center; font-size: .7rem; font-weight: 800; color: var(--text-muted); }
 
     @media (max-width: 480px) {
+      .signal-item.has-vendor { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 8px; }
+      .has-vendor .signal-icon { display: none; }
+      .has-vendor .signal-info { grid-column: 1 / -1; }
+      .has-vendor .vendor-tag { justify-self: start; }
       header { padding: 12px 14px; } .brand h1 { font-size: 1rem; }
       .mode-switch-container { padding: 10px 12px; } .mode-tab { font-size: .78rem; }
       .card { padding: 12px; } .canvas-placeholder.camera-active { max-width: 100%; }
@@ -753,6 +889,20 @@ const char index_html[] PROGMEM = R"rawliteral(
             <button class="rbtn" id="btnDeepScan" type="button">Scan 2.4 GHz clients</button>
           </div>
           <p class="deep-scan-status" id="deepScanStatus" role="status">Listen for devices connected to nearby Wi-Fi networks.</p>
+          <div id="deepFilters" hidden>
+            <div class="rssi-filter-wrap">
+              <div class="rssi-filter-header">
+                <label class="rssi-filter-label" for="deepThreshold">Client signal strength</label>
+                <output class="rssi-filter-val" id="deepThresholdLabel" for="deepThreshold">All signals</output>
+              </div>
+              <input type="range" class="rssi-slider" id="deepThreshold" min="-100" max="-30" value="-100">
+            </div>
+            <div class="audit-filter-row" aria-label="Deep Scan history filter">
+              <button class="audit-chip active" data-deep-filter="all" aria-pressed="true">All</button>
+              <button class="audit-chip" data-deep-filter="scanned" aria-pressed="false">Scanned (<span id="deepScannedCount">0</span>)</button>
+              <button class="audit-chip" data-deep-filter="unscanned" aria-pressed="false">Not Scanned (<span id="deepUnscannedCount">0</span>)</button>
+            </div>
+          </div>
           <ul class="signal-list deep-scan-results" id="deepScanResults"></ul>
         </section>
       </div>
@@ -1925,6 +2075,8 @@ const char index_html[] PROGMEM = R"rawliteral(
     let espBaseUrl = '', isConnected = false, scanInterval = null;
     let normalScanDone = null;
     let deepScanRequested = false;
+    let deepClients = [], deepFilter = 'all';
+    let clientReadPoint = Date.now() >>> 0;
     let connectionGeneration = 0;
     let lastWifiData = [], lastBleData = [];
     let lastListFetch = 0;
@@ -2066,7 +2218,8 @@ const char index_html[] PROGMEM = R"rawliteral(
       missCount = 0;
       phase = 'READING';
       // Only accept scans completed after this moment: ignore the scan already cached.
-      const current = target.type === 'wifi' ? lastWifiData : lastBleData;
+      if (target.type === 'client') clientReadPoint = ((clientReadPoint + 1) >>> 0) || 1;
+      const current = target.type === 'client' ? null : (target.type === 'wifi' ? lastWifiData : lastBleData);
       const cur = Number(current && current.scanId);
       lastProcessedScanId = Number.isFinite(cur) && cur > 0 ? cur : null;
       if (purpose === 'measure') {
@@ -2084,13 +2237,17 @@ const char index_html[] PROGMEM = R"rawliteral(
       fetch(`${espBaseUrl}/track?${q}`, { cache: 'no-store' }).catch(() => {});
     }
 
-    function lockTarget(type, id, name, channel) {
+    function lockTarget(type, id, name, channel, client) {
+      if (type === 'client' && demoSimActive) {
+        deepScanStatus.textContent = 'Stop the demo before tracking a Deep Scan client.';
+        return;
+      }
       if (!id) {
         logMessage('Cannot track this device because its stable Wi-Fi/Bluetooth identifier is unavailable.');
         return;
       }
-      target = { type, id: String(id), name };
-      setEspTrack(type, type === 'wifi' ? (Number(channel) || 0) : 0);
+      target = { type, id: String(id), name, client };
+      if (type !== 'client') setEspTrack(type, type === 'wifi' ? (Number(channel) || 0) : 0);
       resetSectors();
       resetMeasurementHistory();
       phase = 'IDLE';
@@ -2110,13 +2267,14 @@ const char index_html[] PROGMEM = R"rawliteral(
       resetMeasurementHistory();
       setTrackingUI(false);
       renderWifiList(lastWifiData); renderBleList(lastBleData);
+      renderDeepClients();
       render();
     }
     btnDropTarget.addEventListener('click', dropTarget);
 
     btnMarkCamera.addEventListener('click', () => {
       if (!target) return;
-      const key = String(target.id).toLowerCase();
+      const key = historyKey(target.type, target.id);
       scannedHistory[key] = {
         id: target.id,
         name: target.name,
@@ -2132,7 +2290,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     btnMarkNoCamera.addEventListener('click', () => {
       if (!target) return;
-      const key = String(target.id).toLowerCase();
+      const key = historyKey(target.type, target.id);
       scannedHistory[key] = {
         id: target.id,
         name: target.name,
@@ -2245,7 +2403,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     function render() {
       if (!target) {
-        setInstr('Tap Track on a device', 'Pick a specific Wi-Fi access point or Bluetooth device from the list above');
+        setInstr('Tap Track on a device', 'Pick a Wi-Fi network, Bluetooth device, or Deep Scan client.');
         btnHitWall.classList.add('hidden');
         btnRead.classList.add('hidden');
         wallPicker.classList.add('hidden');
@@ -2259,7 +2417,9 @@ const char index_html[] PROGMEM = R"rawliteral(
 
       if (phase === 'READING') {
         btnRead.textContent = '⏳ Reading…';
-        if (missCount >= 3) {
+        if (target.type === 'client' && missCount >= 3) {
+          setInstr('Waiting for client traffic', 'Hold still. If the device stays quiet or changes networks, stop tracking and run Deep Scan again.', 'warn', true);
+        } else if (missCount >= 3) {
           setInstr('Selected device not seen', `Still waiting for ${target.name} (${target.id}). Other signals are ignored.`, 'warn', true);
         } else {
           const what = readingPurpose === 'baseline' ? 'READING START POINT' : 'READING SIGNAL';
@@ -2412,11 +2572,15 @@ const char index_html[] PROGMEM = R"rawliteral(
     demoHeading.addEventListener('input', () => { if (demoSimActive) { heading = +demoHeading.value; render(); } });
 
     // ─── Lists ────────────────────────────────────────────────────────────────
-    function makeTrackBtn(type, id, name, channel) {
+    function historyKey(type, id) {
+      return (type === 'client' ? 'client:' : '') + String(id).toLowerCase();
+    }
+
+    function makeTrackBtn(type, id, name, channel, client) {
       const btn = document.createElement('button');
       btn.className = 'btn-track';
       btn.textContent = 'Track';
-      btn.addEventListener('click', e => { e.stopPropagation(); lockTarget(type, id, name, channel); });
+      btn.addEventListener('click', e => { e.stopPropagation(); lockTarget(type, id, name, channel, client); });
       return btn;
     }
 
@@ -2434,6 +2598,102 @@ const char index_html[] PROGMEM = R"rawliteral(
         return true;
       });
     };
+
+    // IEEE MA-L assignments, matched offline in the browser.
+    const macVendors = new Map();
+    function addMacVendor(brand, isCameraBrand, prefixes) {
+      const vendor = { brand, isCameraBrand };
+      for (const prefix of prefixes.split(/\s+/)) macVendors.set(prefix, vendor);
+    }
+
+    addMacVendor('Hikvision', true,
+      '00BC99 040312 04EECD 083BC1 085411 08A189 08CC81 0C75D2 1012FB 1868CB 188025 240F9B 2428FD 2432AE ' +
+      '244845 24B105 2857BE 2CA59C 340962 3C1BF8 40ACBF 40B570 4419B6 4447CC 44A642 48785B 4C1F86 4C62DF ' +
+      '4CBD8F 4CF5DC 50E538 548C81 54C415 5803FB 5850ED 5C345B 64DB8B 686DBC 743FC2 80489F 807C62 80BEAF ' +
+      '80F5AE 849459 849A40 88DE39 8C22D2 8CE748 94E1AC 988B0A 989DE5 98DF82 98F112 A0FF0C A41437 A42902 ' +
+      'A44BD9 A4A459 A4D5C2 ACB92F ACCB51 B0FF0D B4A382 BC2978 BC5E33 BC9B5E BCAD28 BCBAC2 C0517E C056E3 ' +
+      'C06DED C42F90 C8A702 CC13F3 D4E853 DC07F8 DCD26A E0BAAD E0CA3C E0DF13 E4D58B E8A0ED ECA971 ECC89C ' +
+      'F84DFC FC9FFD');
+    addMacVendor('Dahua', true,
+      '08EDED 14A78B 202C05 24526A 30DDAA 38AF29 3CE36B 3CEF8C 407AA4 4C11BF 4C99E8 5CF51A 64FD29 6C1C71 ' +
+      '74C929 8CE9B4 9002A9 98F9CC 9C1463 A0BD1D A8CA87 B44C3B BC325F C0395A C4AAC4 D4430E E02EFE E0508B ' +
+      'E4246C F4B1C2 F8CE07 FC5F49 FCB69D');
+    addMacVendor('Axis', true,
+      '00408C ACCC8E B8A44F E82725');
+    addMacVendor('CP Plus', true,
+      '140708');
+    addMacVendor('Reolink', true,
+      'EC71DB');
+    addMacVendor('EZVIZ', true,
+      '0CA64C 20BBBC 34C6DD 38F25D 54D60D 588FCF 64244D 64F2FB 78A6A0 78C1AE 94EC13 AC1C26 EC97E0 F47018 ' +
+      'FC2422');
+    addMacVendor('Uniview', true,
+      '14BA88 48EA63 6CF17E 88263F C47905');
+    addMacVendor('Hanwha Vision', true,
+      '44B423 E43022');
+    addMacVendor('Vivotek', true,
+      '0002D1');
+    addMacVendor('Wyze', true,
+      '2CAA8E 7C78B2 80482C D03F27 F0C88B');
+    addMacVendor('Arlo', true,
+      '486264 A41162 FC9C98');
+    addMacVendor('Tiandy', true,
+      '3CDA6D BC516C E4E66C');
+    addMacVendor('Mobotix', true,
+      '0003C5');
+    addMacVendor('Espressif', false,
+      '004B12 007007 00FB4A 048308 04B247 083A8D 083AF2 089272 08A6F7 08AD0A 08B61F 08D1F9 08F9E0 0C4EA0 ' +
+      '0C8B95 0CB815 0CDC7E 10003B 10061C 1020BA 1051DB 10521C 1091A8 1097BD 10A85B 10B41D 10BDA3 140808 ' +
+      '142B2F 14335C 146393 14C19F 188B0E 18FE34 1C2904 1C6465 1C6920 1C8B84 1C8F57 1C9DC2 1CC3AB 1CDBD4 ' +
+      '1CE4CB 202565 2043A8 20500D 206EF1 209BA9 20D5C2 20E5A4 20E7C8 240AC4 244CAB 24587C 2462AB 246F28 ' +
+      '24A160 24B2DE 24D7EB 24DCC3 24EC4A 2805A5 28372F 28562F 288485 2C3AE8 2CBCBB 2CF432 3030F9 3076F5 ' +
+      '308398 30AEA4 30C6F7 30C922 30EDA0 345F45 348518 34865D 349454 34987A 34AB95 34B472 34B7DA 34C934 ' +
+      '34CDB0 38182B 383E51 3844BE 3C0D0D 3C0F02 3C6105 3C71BF 3C8427 3C8A1F 3CDC75 3CE255 3CE90E 4022D8 ' +
+      '402BD6 404CCA 409151 40F520 441793 441BF6 441D64 447B30 44B176 44BD8D 4827E2 4831B7 483FDA 485519 ' +
+      '489D31 48AFF3 48CA43 48E729 48F6EE 4C11AE 4C7525 4C8421 4CC382 4CEBD6 500291 50787D 5416A5 542B88 ' +
+      '543204 5443B2 545AA6 549DEA 582ABD 582BD3 588C81 58B145 58BF25 58CF79 58E6C5 5C013B 5CCF7F 600194 ' +
+      '6055F9 648914 64B708 64E833 680947 6825DD 686725 689DD2 68B6B3 68C63A 68EE8F 68FE71 6C2FA0 6C3DD8 ' +
+      '6CB456 6CC4AF 6CC840 6CE210 70039F 70041D 704BCA 70AF09 70B8F6 744DBD 748927 781C3C 782184 78421C ' +
+      '78E36D 78EE4C 7C0C5F 7C2C67 7C4FAD 7C7398 7C87CE 7C9EBD 7CD544 7CDFA1 7CE8B1 80456B 8053E0 80646F ' +
+      '806599 807D3A 80B54E 80F1B2 80F3DA 840D8E 841FE8 84C7BB 84CCA8 84F3EB 84F703 84FCE6 8813BF 8856A6 ' +
+      '885721 88F155 8C4598 8C4B14 8C4F00 8C8C29 8C94DF 8CAAB5 8CBFEA 8CCE4E 8CFD49 901506 90380C 90649B ' +
+      '907069 9097D5 90B339 90DA72 90E5B1 943CC6 9451DC 9454C5 94A990 94B555 94B97E 94E686 983DAE 9888E0 ' +
+      '98A316 98C377 98CDAC 98F4AB 9C139E 9C96D5 9C9C1F 9C9E6E 9CCC01 9CE087 A020A6 A06025 A0764E A085E3 ' +
+      'A0A3B3 A0B765 A0DD6C A0F262 A47B9D A4CB8F A4CF12 A4E57C A4E972 A4F00F A8032A A842E3 A84674 A848FA ' +
+      'A8FD07 AC0BFB AC1518 AC276E AC67B2 ACA26A ACA704 ACD074 ACEBE6 B03FD3 B08184 B0A604 B0A732 B0B21C ' +
+      'B0CBD8 B43A45 B48A0A B4A64A B4BFE9 B4E62D B4FEB5 B81F3F B87B4D B8BB11 B8D61A B8F009 B8F862 BC1926 ' +
+      'BCDDC2 BCFF4D C049EF C04E30 C05D89 C0CDD6 C44F33 C45BBE C49E7E C4D8D5 C4DD57 C4DEE2 C82B96 C82E18 ' +
+      'C88541 C88A7B C8C9A3 C8DA29 C8EA71 C8ED8B C8F09E CC50E3 CC68C7 CC7B5C CC7E1F CC8DA2 CCBA97 CCDBA7 ' +
+      'CCE732 D09AAF D0CF13 D0EF76 D40592 D48AFC D48C49 D4D4DA D4E9F4 D4F98D D8132A D82332 D83BDA D885AC ' +
+      'D8A01D D8BC38 D8BFC0 D8F15B DC0675 DC0A69 DC1ED5 DC4F22 DC5475 DC55B1 DCB4D9 DCDA0C E05A1B E072A1 ' +
+      'E08CFE E09806 E0E2E6 E465B8 E4B063 E4B323 E80690 E831CD E83DC1 E868E7 E86BEA E89F6D E8DB84 E8EDBD ' +
+      'E8F60A EC6260 EC64C9 EC94CB ECC9FF ECD61B ECDA3B ECE334 ECFABC F008D1 F0161D F024F9 F09E9E F0F5BD ' +
+      'F412FA F42DC9 F4650B F4CFA2 F80C4E F843EE F85B1B F8B3B7 FC012C FCB467 FCE8C0 FCF5C4');
+    addMacVendor('Tuya', false,
+      '00337A 105A17 10D561 1869D8 18DE50 1C90FF 20F1B2 2C1DBB 2CB471 30487D 381F8D 382CE5 38A5C9 3C0B59 ' +
+      '4CA919 508A06 508BB9 68572D 708976 7CF666 80647C 84E342 A09208 A88055 A8AB18 A8DDBC ACF878 B8060D ' +
+      'BC351E C0F853 C482E1 CC8CBF D032E7 D082E8 D082EB D4A651 D81F12 D8C80C D8D668 D8FC92 E4AEE4 F8172D ' +
+      'FC3CD7 FC671F');
+
+    function makeVendorTag(mac) {
+      if (typeof mac !== 'string' || !/^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac)) return null;
+      if (parseInt(mac.slice(0, 2), 16) & 3) return null; // Local or group address
+      const vendor = macVendors.get(mac.slice(0, 8).replace(/:/g, '').toUpperCase());
+      if (!vendor) return null;
+      const tag = document.createElement('span');
+      tag.className = vendor.isCameraBrand ? 'vendor-tag' : 'vendor-tag iot';
+      tag.textContent = (vendor.isCameraBrand ? 'Camera brand · ' : 'IoT vendor · ') + vendor.brand;
+      tag.title = 'Manufacturer prefix match only. Device type is unknown.';
+      return tag;
+    }
+
+    function showScanVendor(item, mac) {
+      const tag = makeVendorTag(mac);
+      if (tag) {
+        item.classList.add('has-vendor');
+        item.querySelector('.rssi-bar-wrap').before(tag);
+      }
+    }
 
     function renderWifiList(signals) {
       wifiList.innerHTML = '';
@@ -2478,6 +2738,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             <div class="rssi-bar-bg"><div class="rssi-bar-fill" style="width:${rssiToPercent(sig.rssi)}%;background:${rssiColor(sig.rssi)};"></div></div>
           </div>`;
         const btn = makeTrackBtn('wifi', sig.bssid, sig.ssid || sig.bssid, sig.channel);
+        showScanVendor(item, sig.bssid);
         btn.textContent = btnText;
         item.appendChild(btn);
         wifiList.appendChild(item);
@@ -2527,6 +2788,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             <div class="rssi-bar-bg"><div class="rssi-bar-fill" style="width:${rssiToPercent(sig.rssi)}%;background:${rssiColor(sig.rssi)};"></div></div>
           </div>`;
         const btn = makeTrackBtn('ble', sig.id, sig.name || sig.id);
+        if (sig.publicAddress === true) showScanVendor(item, sig.id);
         btn.textContent = btnText;
         item.appendChild(btn);
         bleList.appendChild(item);
@@ -2567,6 +2829,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         scannedHistory = {};
         saveScannedHistory();
         logMessage('Cleared network inspection history.');
+        renderDeepClients();
         renderWifiList(lastWifiData);
         renderBleList(lastBleData);
       }
@@ -2583,6 +2846,71 @@ const char index_html[] PROGMEM = R"rawliteral(
     const btnDeepScan = $('btnDeepScan');
     const deepScanStatus = $('deepScanStatus');
     const deepScanResults = $('deepScanResults');
+
+    function renderDeepClients() {
+      const threshold = Number($('deepThreshold').value);
+      const scanned = deepClients.filter(c => scannedHistory[historyKey('client', c.mac)]).length;
+      $('deepScannedCount').textContent = scanned;
+      $('deepUnscannedCount').textContent = deepClients.length - scanned;
+      $('deepFilters').hidden = !deepClients.length;
+      $('deepThresholdLabel').textContent = threshold === -100 ? 'All signals' : '≥ ' + threshold + ' dBm';
+      deepScanResults.replaceChildren();
+      for (const client of deepClients) {
+        const record = scannedHistory[historyKey('client', client.mac)];
+        if ((deepFilter === 'scanned' && !record) || (deepFilter === 'unscanned' && record)) continue;
+        const hasSignal = Number.isFinite(client.rssi);
+        if (threshold > -100 && (!hasSignal || client.rssi < threshold)) continue;
+        const item = document.createElement('li');
+        item.className = 'signal-item deep-scan-result';
+        const badge = record ? (record.status === 'CAMERA' ? 'Camera found' : 'No camera') : 'Not scanned';
+        const badgeClass = record ? (record.status === 'CAMERA' ? 'badge-camera' : 'badge-safe') : 'badge-unscanned';
+        item.innerHTML = `<div class="signal-info">
+          <strong>${esc(client.mac)}</strong>
+          <div class="signal-meta">${esc(client.network)} · Ch ${esc(client.channel)}</div>
+          <span class="device-badge ${badgeClass}">${badge}</span>
+        </div><div class="rssi-bar-wrap"><span class="rssi-value">${hasSignal ? esc(client.rssi) + ' dBm' : 'No reading'}</span>
+          ${hasSignal ? '<div class="rssi-bar-bg"><div class="rssi-bar-fill"></div></div>' : ''}</div>`;
+        if (hasSignal) {
+          const bar = item.querySelector('.rssi-bar-fill');
+          bar.style.width = rssiToPercent(client.rssi) + '%';
+          bar.style.background = rssiColor(client.rssi);
+        }
+        if (client.uplinkPackets >= 4 || client.uplinkBytes >= 1500) {
+          const flag = document.createElement('span');
+          flag.className = 'deep-scan-flag';
+          flag.textContent = 'Inspect · ' + client.uplinkPackets + ' outgoing frames, ' + client.uplinkBytes + ' bytes';
+          item.querySelector('.signal-info').append(flag);
+        }
+        const tag = makeVendorTag(client.mac) || document.createElement('span');
+        if (!tag.textContent) {
+          tag.className = 'signal-meta';
+          tag.textContent = 'Brand unknown';
+        }
+        item.classList.add('has-vendor');
+        item.querySelector('.rssi-bar-wrap').before(tag);
+        const btn = makeTrackBtn('client', client.mac, 'Wi-Fi client', client.channel, client);
+        if (record) btn.textContent = 'Re-Track';
+        item.append(btn);
+        deepScanResults.append(item);
+      }
+      if (deepClients.length && !deepScanResults.childElementCount) {
+        const empty = document.createElement('li');
+        empty.className = 'empty-state';
+        empty.textContent = 'No clients match these filters.';
+        deepScanResults.append(empty);
+      }
+    }
+
+    $('deepThreshold').addEventListener('input', renderDeepClients);
+    const deepChips = document.querySelectorAll('[data-deep-filter]');
+    for (const chip of deepChips) chip.addEventListener('click', () => {
+      deepFilter = chip.dataset.deepFilter;
+      for (const button of deepChips) {
+        button.classList.toggle('active', button === chip);
+        button.setAttribute('aria-pressed', String(button === chip));
+      }
+      renderDeepClients();
+    });
 
     async function fetchDeepScan(url, method = 'GET') {
       const controller = new AbortController();
@@ -2622,7 +2950,8 @@ const char index_html[] PROGMEM = R"rawliteral(
       btnDeepScan.textContent = 'Scanning…';
       $('wifiList').inert = true;
       $('bleList').inert = true;
-      deepScanResults.replaceChildren();
+      deepClients = [];
+      renderDeepClients();
       try {
         if (normalScanDone) {
           btnDeepScan.textContent = 'Queued…';
@@ -2649,25 +2978,11 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
         if (result === null) throw new Error('Deep Scan timed out. Check the ESP32 connection and try again.');
         const { clients, hotspotOnly } = result;
-        for (const client of clients) {
-          const item = document.createElement('li');
-          item.className = 'deep-scan-result';
-          const network = networkNames.get(client.bssid) || client.bssid;
-          const signal = client.rssi === null ? 'client signal unavailable' : client.rssi + ' dBm';
-          const address = document.createElement('strong');
-          address.textContent = client.mac;
-          const metadata = document.createElement('div');
-          metadata.className = 'signal-meta';
-          metadata.textContent = network + ' · Channel ' + client.channel + ' · ' + signal;
-          item.append(address, metadata);
-          if (client.uplinkPackets >= 4 || client.uplinkBytes >= 1500) {
-            const flag = document.createElement('span');
-            flag.className = 'deep-scan-flag';
-            flag.textContent = 'Inspect · ' + client.uplinkPackets + ' outgoing frames, ' + client.uplinkBytes + ' bytes';
-            item.append(flag);
-          }
-          deepScanResults.appendChild(item);
-        }
+        if (!isConnected || generation !== connectionGeneration) return;
+        deepClients = clients.map((client, slot) => ({
+          ...client, slot, network: networkNames.get(client.bssid) || client.bssid
+        })).sort((a, b) => (b.rssi ?? -Infinity) - (a.rssi ?? -Infinity));
+        renderDeepClients();
         const channels = [];
         for (let channel = 1; channel <= 13; channel++) {
           if (result.channelMask & (1 << channel)) channels.push(channel);
@@ -2720,7 +3035,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     // While READING, take one sample per new scan for the selected BSSID / Bluetooth MAC.
     function feedTarget(wifi, ble) {
-      if (!target || demoSimActive || phase !== 'READING') return;
+      if (!target || target.type === 'client' || demoSimActive || phase !== 'READING') return;
       const signals = target.type === 'wifi' ? wifi : ble;
       const scanId = Number(signals.scanId);
       if (!Number.isFinite(scanId) || scanId <= 0 || scanId === lastProcessedScanId) return;
@@ -2737,13 +3052,43 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     }
 
+    async function pollClientReading(selected, point) {
+      if (phase !== 'READING') return;
+      const client = selected.client;
+      const query = new URLSearchParams({ slot: client.slot, mac: client.mac, bssid: client.bssid, point });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(espBaseUrl + '/client-reading?' + query, { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) {
+          const reason = response.status === 409 || response.status === 503 ? await response.text() : 'Client reading failed (HTTP ' + response.status + ').';
+          if (target === selected && clientReadPoint === point) {
+            dropTarget();
+            deepScanStatus.textContent = reason;
+          }
+          return;
+        }
+        const reading = await response.json();
+        if (target !== selected || phase !== 'READING' || clientReadPoint !== point ||
+            !reading.id || reading.id === lastProcessedScanId) return;
+        lastProcessedScanId = reading.id;
+        if (Number.isFinite(reading.rssi)) onSample(reading.rssi);
+        else {
+          missCount++;
+          render();
+        }
+      } finally { clearTimeout(timer); }
+    }
+
     async function fetchSignals() {
       if (!isConnected || !espBaseUrl || normalScanDone || deepScanRequested) return;
       if (!target && Date.now() - lastListFetch < POLL_LIST_MS) return;
       let finishScan;
       normalScanDone = new Promise(resolve => { finishScan = resolve; });
       try {
-        if (target) {
+        if (target && target.type === 'client') {
+          await pollClientReading(target, clientReadPoint);
+        } else if (target) {
           // Tracking: poll only the selected device's endpoint, fast.
           if (target.type === 'wifi') lastWifiData = await fetchSignalArray(`${espBaseUrl}/wifi`);
           else lastBleData = await fetchSignalArray(`${espBaseUrl}/ble`);
@@ -2782,6 +3127,9 @@ const char index_html[] PROGMEM = R"rawliteral(
         connectedIpDisplay.classList.remove('visible');
         refreshLabel.textContent = 'Not connected'; refreshDot.style.backgroundColor = '#ccc';
         lastWifiData = []; lastBleData = [];
+        deepClients = [];
+        renderDeepClients();
+        deepScanStatus.textContent = 'Connect to the ESP32 to run Deep Scan.';
         wifiList.innerHTML = '<div class="empty-state"><span>📡</span>Connect to ESP32 to scan</div>';
         bleList.innerHTML = '<div class="empty-state"><span>🔵</span>Connect to ESP32 to scan</div>';
         wifiCount.textContent = '0'; bleCount.textContent = '0'; totalSignalCount.textContent = '0 signals';
@@ -2871,6 +3219,7 @@ void setup() {
   server.on("/pir-status", handlePIR);
   server.on("/trigger-whatsapp", handleWhatsApp);
   server.on("/track", handleTrack);
+  server.on("/client-reading", HTTP_GET, handleClientReading);
 
   server.begin();
 
